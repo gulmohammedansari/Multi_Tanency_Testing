@@ -497,7 +497,7 @@
   <div class="sidebar-footer">
     <div class="user-pill">
       <div class="avatar" id="sidebar-avatar">GM</div>
-      <div class="user-info"><div class="name" id="sidebar-username">Admin</div><div class="role">G.M. Enterprises</div></div>
+      <div class="user-info"><div class="name" id="sidebar-username">Admin</div><div class="role" id="sidebar-company">—</div></div>
     </div>
   </div>
 </aside>
@@ -1586,11 +1586,11 @@
         <div class="card-header"><div class="card-title">Business Profile</div></div>
         <div class="modal-body">
           <div class="form-grid">
-            <div class="form-group"><label>Business Name</label><input type="text" value="G.M. ENTERPRISES" readonly/></div>
-            <div class="form-group"><label>GSTIN</label><input type="text" value="27AHKPA9376Q1ZH" readonly/></div>
-            <div class="form-group full"><label>Address</label><textarea rows="2" readonly>07/7A, Musa Killeder Marg, Ram Rahim Compound, Jacob Circle, Byculla West, Mumbai - 400011</textarea></div>
-            <div class="form-group"><label>Phone</label><input type="text" value="9862691203 / 9619231477" readonly/></div>
-            <div class="form-group"><label>State</label><input type="text" value="Maharashtra (Code: 27)" readonly/></div>
+            <div class="form-group"><label>Business Name</label><input type="text" id="settings-name" value="" readonly/></div>
+            <div class="form-group"><label>GSTIN</label><input type="text" id="settings-gstin" value="" readonly/></div>
+            <div class="form-group full"><label>Address</label><textarea rows="2" id="settings-address" readonly></textarea></div>
+            <div class="form-group"><label>Phone</label><input type="text" id="settings-phone" value="" readonly/></div>
+            <div class="form-group"><label>State</label><input type="text" id="settings-state" value="" readonly/></div>
           </div>
         </div>
       </div>
@@ -1598,10 +1598,10 @@
         <div class="card-header"><div class="card-title">Bank Details</div></div>
         <div class="modal-body">
           <div class="form-grid">
-            <div class="form-group full"><label>Bank Name</label><input type="text" value="KOTAK MAHINDRA BANK LTD" readonly/></div>
-            <div class="form-group"><label>Account No.</label><input type="text" value="5949518784" readonly/></div>
-            <div class="form-group"><label>IFSC Code</label><input type="text" value="KKBK0001481" readonly/></div>
-            <div class="form-group"><label>UPI ID</label><input type="text" value="9892691203@ptaxis" readonly/></div>
+            <div class="form-group full"><label>Bank Name</label><input type="text" id="settings-bank" value="" readonly/></div>
+            <div class="form-group"><label>Account No.</label><input type="text" id="settings-acctno" value="" readonly/></div>
+            <div class="form-group"><label>IFSC Code</label><input type="text" id="settings-ifsc" value="" readonly/></div>
+            <div class="form-group"><label>UPI ID</label><input type="text" id="settings-upi" value="" readonly/></div>
           </div>
         </div>
       </div>
@@ -1765,12 +1765,14 @@
 // ── CONFIG ──────────────────────────────────────────────────────────────────
 const googleScriptUrl = "https://script.google.com/macros/s/AKfycbyZZ7zeVFY0oFj8-_BzPxd6JU2A_5xiAUK5NxJOh8yDmKXi2I5VnwHagPb50zkYC7ga/exec";
 
-const COMPANY = {
-  name:'G.M.ENTERPRISES', address:'07/7A, Musa Killeder Marg, Ram Rahim Compound, Jacob Circle, Byculla West, Mumbai - 400011',
-  gstin:'27AHKPA9376Q1ZH', state:'Maharashtra', stateCode:'27',
-  phone:'9862691203/9619231477', email:'gmfirenterprises/gmengineerss@gmail.com',
-  website:'www.gmenterprises.com', bank:'KOTAK MAHINDRA BANK LTD',
-  acctName:'G.M.ENTERPRISES', acctNo:'5949518784', ifsc:'KKBK0001481', upi:'9892691203@ptaxis'
+// COMPANY is populated entirely from the server (Tenant record in GScript) —
+// on login (doLogin) and on session-restore (init) via loadCompanyInfo().
+// No business details are hardcoded on the frontend; empty strings below
+// are just safe placeholders until the server responds.
+let COMPANY = {
+  name:'', address:'', gstin:'', state:'', stateCode:'',
+  phone:'', email:'', website:'', bank:'',
+  acctName:'', acctNo:'', ifsc:'', upi:''
 };
 
 function escapeHtml(text){return String(text==null?'':text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -1829,6 +1831,10 @@ async function doLogin(){
     if(data.success){
       sessionStorage.setItem('gme_token',data.token); sessionStorage.setItem('gme_username',data.username);
       sessionStorage.setItem('gme_display',data.displayName||data.username);
+      if(data.company){
+        COMPANY=Object.assign({},COMPANY,data.company);
+        sessionStorage.setItem('gme_company',JSON.stringify(COMPANY));
+      }
       showApp(data.displayName||data.username);
     }else{
       errBox.textContent=data.message||'Invalid username or password.';errBox.style.display='block';
@@ -1838,12 +1844,45 @@ async function doLogin(){
   finally{btn.disabled=false;btn.textContent='Sign In';}
 }
 
+// Pushes the current COMPANY object into every place it's shown in the UI
+// (sidebar + Settings page). Print/email templates read COMPANY directly,
+// so nothing else needs to change.
+function applyCompanyToUI(){
+  const sc=document.getElementById('sidebar-company'); if(sc) sc.textContent=COMPANY.name||'—';
+  const map={
+    'settings-name':COMPANY.name,'settings-gstin':COMPANY.gstin,'settings-phone':COMPANY.phone,
+    'settings-bank':COMPANY.bank,'settings-acctno':COMPANY.acctNo,'settings-ifsc':COMPANY.ifsc,'settings-upi':COMPANY.upi
+  };
+  Object.keys(map).forEach(id=>{const el=document.getElementById(id); if(el) el.value=map[id]||'';});
+  const addr=document.getElementById('settings-address'); if(addr) addr.value=COMPANY.address||'';
+  const state=document.getElementById('settings-state'); if(state) state.value=COMPANY.state?(COMPANY.state+(COMPANY.stateCode?' (Code: '+COMPANY.stateCode+')':'')):'';
+}
+
+// Fetches the tenant's company/bank details fresh from the server —
+// used on session-restore (page refresh) when sessionStorage doesn't
+// already have a cached copy from the most recent login.
+async function loadCompanyInfo(){
+  const token=sessionStorage.getItem('gme_token')||'';
+  if(!token) return;
+  try{
+    const res=await fetch(`${googleScriptUrl}?action=getCompanyInfo&token=${encodeURIComponent(token)}`);
+    const data=await res.json();
+    if(data.sessionExpired){doLogout();return;}
+    if(data.success&&data.company){
+      COMPANY=Object.assign({},COMPANY,data.company);
+      sessionStorage.setItem('gme_company',JSON.stringify(COMPANY));
+      applyCompanyToUI();
+    }
+  }catch(e){/* non-fatal — Settings/print will just show blanks until next successful load */}
+}
+
 function showApp(displayName){
   document.getElementById('login-overlay').classList.add('hidden');
   document.getElementById('app-shell').style.display='flex';
   const uname=displayName||sessionStorage.getItem('gme_display')||'Admin';
   document.getElementById('sidebar-username').textContent=uname;
   document.getElementById('sidebar-avatar').textContent=uname.substring(0,2).toUpperCase();
+  applyCompanyToUI();
   loadDashboard();
 }
 
@@ -2441,7 +2480,7 @@ tr:nth-child(even) td{background:#f5f5f8;}
 .total-row td{background:#E8E6FF;font-weight:700;border-top:2px solid #7B72E9;color:#000;}
 .footer{margin-top:10px;font-size:8px;color:#888;text-align:right;}
 </style></head><body>
-<h2>G.M. ENTERPRISES — ${title}</h2>
+<h2>${COMPANY.name} — ${title}</h2>
 <div class="meta">GSTIN: ${COMPANY.gstin} &nbsp;|&nbsp; ${COMPANY.address} &nbsp;|&nbsp; Generated: ${today}</div>
 <table><thead><tr>${thHtml}</tr></thead><tbody>${tdHtml}${totHtml}</tbody></table>
 <div class="footer">This is a computer-generated report. Subject to Maharashtra Jurisdiction.</div>
@@ -5183,7 +5222,12 @@ function loadDashboardAMC(){
 // ── INIT ──────────────────────────────────────────────────────────────────────
 (function init(){
   if(sessionStorage.getItem('gme_token')){
+    const cachedCompany=sessionStorage.getItem('gme_company');
+    if(cachedCompany){
+      try{COMPANY=Object.assign({},COMPANY,JSON.parse(cachedCompany));}catch(e){}
+    }
     showApp(sessionStorage.getItem('gme_display')||sessionStorage.getItem('gme_username')||'Admin');
+    if(!cachedCompany) loadCompanyInfo(); // fall back to a fresh server fetch
   }
 })();
 
