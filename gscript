@@ -244,6 +244,7 @@ function doGet(e) {
     if (action === 'getAMCData')         return handleGetAMCData();
     if (action === 'getNextCertNo')        return handleGetNextCertNo();
     if (action === 'getCertificates')      return handleGetCertificates();
+    if (action === 'getCompanyInfo')       return handleGetCompanyInfo();
 
     return jsonOut({ success: false, message: 'Unknown action parameter' });
 
@@ -376,6 +377,14 @@ function handleLogin(username, password) {
     tenantName:  company.name,
     company:     company
   });
+}
+
+// Returns the current tenant's company/bank details — used by the frontend
+// on session-restore (page refresh) to repopulate the Sidebar + Settings
+// page without re-prompting login. applyTenantContext() has already set
+// COMPANY to the correct tenant's data before this runs (see doGet router).
+function handleGetCompanyInfo() {
+  return jsonOut({ success: true, company: COMPANY });
 }
 
 // ── TENANT PROVISIONING ──────────────────────────────────────────────────────
