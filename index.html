@@ -2955,45 +2955,95 @@ function printInvoiceHtml(data){
   const grandTotal=parseFloat(data.grandTotal||(subTotal+cgstAmt+sgstAmt+igstAmt));
   const fmtD=fmtDMY(data.date);
 
-  let itemRowsHtml='';
-  items.forEach((item,idx)=>{
-    const amt=parseFloat(item.amount||0).toFixed(2);
-    const rate=parseFloat(item.rate||0).toFixed(2);
-    itemRowsHtml+=`<tr style="height:22px;"><td style="border-right:1px solid #000;text-align:center;">${idx+1}</td><td style="border-right:1px solid #000;padding:2px 5px;"><strong>${item.desc||''}</strong></td><td style="border-right:1px solid #000;text-align:center;font-family:monospace;">${item.hsn||''}</td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;"><strong>${item.qty}</strong></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;">${rate}</td><td style="border-right:1px solid #000;text-align:center;">${item.unit||'Nos'}</td><td style="text-align:right;padding-right:4px;font-family:monospace;"><strong>${amt}</strong></td></tr>`;
-  });
+  // ── PAGINATION ───────────────────────────────────────────────────────────
+  // Splits item rows across as many A4 pages as needed so long invoices
+  // flow onto page 2, 3, ... instead of being squeezed/clipped onto one
+  // page. Short invoices (the vast majority — up to 20 items with tax, or
+  // 22 without) still render as a single page, identical to before.
+  const ROWS_PER_PAGE=22;
+  const taxRowCount=cgstAmt>0?2:(igstAmt>0?1:0);
+  const pages=[];
+  let pIdx=0, pDone=false;
+  do{
+    const remaining=items.length-pIdx;
+    const isLast=remaining<=(ROWS_PER_PAGE-taxRowCount);
+    const take=isLast?remaining:ROWS_PER_PAGE;
+    pages.push({items:items.slice(pIdx,pIdx+take),startIndex:pIdx,isLast});
+    pIdx+=take;
+    pDone=isLast;
+  }while(!pDone);
+  const totalPages=pages.length;
 
-  let taxRowsHtml='';
-  if(cgstAmt>0){
-    taxRowsHtml+=`<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">CGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${cgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${cgstAmt.toFixed(2)}</td></tr>`;
-    taxRowsHtml+=`<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">SGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${sgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${sgstAmt.toFixed(2)}</td></tr>`;
-  }else if(igstAmt>0){
-    taxRowsHtml+=`<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">IGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${igstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${igstAmt.toFixed(2)}</td></tr>`;
-  }
+  const buildTaxRowsHtml=()=>{
+    let html='';
+    if(cgstAmt>0){
+      html+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">CGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${cgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${cgstAmt.toFixed(2)}</td></tr>`;
+      html+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">SGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${sgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${sgstAmt.toFixed(2)}</td></tr>`;
+    }else if(igstAmt>0){
+      html+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">IGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${igstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${igstAmt.toFixed(2)}</td></tr>`;
+    }
+    return html;
+  };
 
-  const filledRows=items.length+(cgstAmt>0?2:igstAmt>0?1:0);
-  const blankCount=Math.max(0,22-filledRows);
-  let blankRowsHtml='';
-  for(let i=0;i<blankCount;i++)blankRowsHtml+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>`;
+  let pagesHtml='';
+  pages.forEach((page,pageIdx)=>{
+    let itemRowsHtml='';
+    page.items.forEach((item,i)=>{
+      const rowNo=page.startIndex+i;
+      const amt=parseFloat(item.amount||0).toFixed(2);
+      const rate=parseFloat(item.rate||0).toFixed(2);
+      itemRowsHtml+=`<tr style="height:26px;"><td style="border-right:1px solid #000;text-align:center;">${rowNo+1}</td><td style="border-right:1px solid #000;padding:2px 5px;"><strong>${item.desc||''}</strong></td><td style="border-right:1px solid #000;text-align:center;font-family:monospace;">${item.hsn||''}</td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;"><strong>${item.qty}</strong></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;">${rate}</td><td style="border-right:1px solid #000;text-align:center;">${item.unit||'Nos'}</td><td style="text-align:right;padding-right:4px;font-family:monospace;"><strong>${amt}</strong></td></tr>`;
+    });
 
-  const htmlContent=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-@page{size:A4 portrait;margin:0;}
-html,body{margin:0;padding:0;width:210mm;height:297mm;overflow:hidden;}
-body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-.pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}
-.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}
-.main-box td{vertical-align:top;padding:4px;}
-.inner-grid{width:100%;border-collapse:collapse;height:100%;}
-.inner-grid td{vertical-align:top;padding:3px 5px;}
-.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}
-.items-grid{width:100%;border-collapse:collapse;height:100%;}
-.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}
-.items-grid td{padding:3px 5px;font-size:11px;border-right:1px solid #000;}
-.items-grid th:last-child,.items-grid td:last-child{border-right:none;}
-.tr{text-align:right;}.tc{text-align:center;}.bold{font-weight:bold;}
-</style></head><body>
-<div class="pc">
-<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">TAX INVOICE</div>
+    const taxRowsHtml=page.isLast?buildTaxRowsHtml():'';
+    const filledRows=page.items.length+(page.isLast?taxRowCount:0);
+    // Non-last pages carry a much smaller footer (just the "Continued…" line
+    // instead of the full amount-in-words/bank-details/signature block), so
+    // they have extra vertical room to fill — pad with a calibrated number
+    // of additional blank rows so the column borders still reach the bottom.
+    const NON_LAST_PAGE_EXTRA_ROWS=6;
+    const blankCount=Math.max(0,ROWS_PER_PAGE-filledRows)+(page.isLast?0:NON_LAST_PAGE_EXTRA_ROWS);
+    let blankRowsHtml='';
+    for(let i=0;i<blankCount;i++)blankRowsHtml+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>`;
+
+    const totalRowHtml=page.isLast?`
+    <tfoot><tr style="border-top:1px solid #000;font-weight:bold;height:24px;">
+      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>
+      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td>
+      <td style="text-align:right;padding-right:4px;font-size:12px;">&#x20B9;${grandTotal.toFixed(2)}</td>
+    </tr></tfoot>`:'';
+
+    const footerBlock=page.isLast?`
+<tr class="b-top b-bottom"><td colspan="2" style="padding:6px;">
+  <div style="font-size:9px;color:#555;text-transform:uppercase;font-weight:bold;">Amount Chargeable (in words):</div>
+  <div class="bold" style="font-size:11px;margin-top:2px;">INR ${numberToWords(Math.round(grandTotal))}</div>
+</td></tr>
+<tr><td colspan="2" style="padding:0;">
+  <table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">
+    <tr style="vertical-align:bottom;">
+      <td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">
+        <div class="bold">Company's Bank Details:</div>
+        <div>Acct Name: <strong>${COMPANY.acctName}</strong></div>
+        <div>Bank Name: <strong>${COMPANY.bank}</strong></div>
+        <div>A/c No: <strong>${COMPANY.acctNo}</strong></div>
+        <div>Branch &amp; IFSC: <strong>${COMPANY.ifsc}</strong></div>
+        <div>UPI ID: <strong>${COMPANY.upi}</strong></div>
+        <div class="bold" style="margin-top:8px;font-size:9px;">Declaration:</div>
+        <div style="font-size:9px;color:#222;text-align:justify;">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. Goods once sold will not be taken back or exchanged.</div>
+      </td>
+      <td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">
+        <div style="font-size:10px;">For <strong>${COMPANY.name}</strong></div>
+        <div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>
+      </td>
+    </tr>
+  </table>
+</td></tr>`:`
+<tr><td colspan="2" style="padding:6px;text-align:center;font-size:9px;color:#555;font-style:italic;">…Continued on next page…</td></tr>`;
+
+    const titleSuffix=totalPages>1?` (PAGE ${pageIdx+1} OF ${totalPages})`:'';
+
+    pagesHtml+=`<div class="pc${pageIdx<totalPages-1?' pc-break':''}">
+<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">TAX INVOICE${titleSuffix}</div>
 <table class="main-box" cellpadding="0" cellspacing="0">
 <tr class="b-bottom" style="height:75px;">
   <td width="50%" class="b-right">
@@ -3033,42 +3083,36 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-heigh
     <tbody>
       ${itemRowsHtml}${taxRowsHtml}${blankRowsHtml}
       <tr style="height:100%;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>
-    </tbody>
-    <tfoot><tr style="border-top:1px solid #000;font-weight:bold;height:24px;">
-      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>
-      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td>
-      <td style="text-align:right;padding-right:4px;font-size:12px;">&#x20B9;${grandTotal.toFixed(2)}</td>
-    </tr></tfoot>
+    </tbody>${totalRowHtml}
   </table>
 </td></tr>
-<tr class="b-top b-bottom"><td colspan="2" style="padding:6px;">
-  <div style="font-size:9px;color:#555;text-transform:uppercase;font-weight:bold;">Amount Chargeable (in words):</div>
-  <div class="bold" style="font-size:11px;margin-top:2px;">INR ${numberToWords(Math.round(grandTotal))}</div>
-</td></tr>
-<tr><td colspan="2" style="padding:0;">
-  <table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">
-    <tr style="vertical-align:bottom;">
-      <td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">
-        <div class="bold">Company's Bank Details:</div>
-        <div>Acct Name: <strong>${COMPANY.acctName}</strong></div>
-        <div>Bank Name: <strong>${COMPANY.bank}</strong></div>
-        <div>A/c No: <strong>${COMPANY.acctNo}</strong></div>
-        <div>Branch &amp; IFSC: <strong>${COMPANY.ifsc}</strong></div>
-        <div>UPI ID: <strong>${COMPANY.upi}</strong></div>
-        <div class="bold" style="margin-top:8px;font-size:9px;">Declaration:</div>
-        <div style="font-size:9px;color:#222;text-align:justify;">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. Goods once sold will not be taken back or exchanged.</div>
-      </td>
-      <td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">
-        <div style="font-size:10px;">For <strong>${COMPANY.name}</strong></div>
-        <div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>
-      </td>
-    </tr>
-  </table>
-</td></tr>
+${footerBlock}
 </table>
 <div style="text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;">SUBJECT TO MAHARASHTRA JURISDICTION</div>
 <div style="text-align:center;font-size:9px;color:#555;margin-top:2px;">This is a Computer Generated Invoice</div>
-</div></body></html>`;
+</div>`;
+  });
+
+  const htmlContent=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+@page{size:A4 portrait;margin:0;}
+html,body{margin:0;padding:0;width:210mm;}
+body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}
+.pc-break{page-break-after:always;break-after:page;}
+.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}
+.main-box td{vertical-align:top;padding:4px;}
+.inner-grid{width:100%;border-collapse:collapse;height:100%;}
+.inner-grid td{vertical-align:top;padding:3px 5px;}
+.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}
+.items-grid{width:100%;border-collapse:collapse;height:100%;}
+.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}
+.items-grid td{padding:3px 5px;font-size:11px;border-right:1px solid #000;}
+.items-grid th:last-child,.items-grid td:last-child{border-right:none;}
+.tr{text-align:right;}.tc{text-align:center;}.bold{font-weight:bold;}
+</style></head><body>
+${pagesHtml}
+</body></html>`;
 
   const old=document.getElementById('_print_frame');if(old)old.parentNode.removeChild(old);
   const iframe=document.createElement('iframe');
