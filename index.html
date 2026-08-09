@@ -2946,7 +2946,9 @@ async function editInvoice(invoiceNo){
 
 // Unified print engine — identical layout to GAS buildInvoiceHtml
 function printInvoiceHtml(data){
-  const items=data.items||[];
+  // Guard against accidental empty rows (e.g. "+ Add Item" clicked but never
+  // filled in) leaking into the printed invoice as phantom line items.
+  const items=(data.items||[]).filter(it=>it&&it.desc&&String(it.desc).trim()!=='');
   const cgstRate=parseFloat(data.cgstRate||0), sgstRate=parseFloat(data.sgstRate||0), igstRate=parseFloat(data.igstRate||0);
   const subTotal=parseFloat(data.subTotal||0);
   const cgstAmt=parseFloat(data.cgstAmount!=null?data.cgstAmount:subTotal*cgstRate/100);
@@ -2956,41 +2958,36 @@ function printInvoiceHtml(data){
   const fmtD=fmtDMY(data.date);
 
   // ── PAGINATION ───────────────────────────────────────────────────────────
-  // Continuing pages (i.e. followed by another page) hold up to 35 items —
-  // there's no footer block on them, so the full page is free for items.
+  // Each page holds up to 27 items — a page only overflows to the next once
+  // item #28 would be needed.
   const ITEMS_PER_PAGE=35;
-  const ROW_HEIGHT=19.0;
-  const NON_LAST_PAGE_EXTRA_ROWS=4;
-  // The LAST page also carries the amount-in-words/bank-details/signature
-  // footer block, which eats a big, fixed chunk of vertical space no matter
-  // how many items are on that page — real-browser testing showed a single
-  // page can only safely hold up to ~30 items before that footer gets
-  // pushed off the bottom and clipped. So a page is only ever treated as
-  // the LAST page when what's left fits within that footer-safe capacity;
-  // otherwise it takes a full 35-item batch and another page follows (even
-  // if that next page ends up holding very few items) — this guarantees
-  // the footer block never gets cut off, no matter the item count.
-  const LAST_PAGE_TARGET_ROWS=30;
-  const taxRowCount=cgstAmt>0?2:(igstAmt>0?1:0);
   const pages=[];
   let pIdx=0, pDone=false;
   do{
     const remaining=items.length-pIdx;
-    const isLast=remaining<=LAST_PAGE_TARGET_ROWS;
-    const take=isLast?remaining:Math.min(ITEMS_PER_PAGE,remaining);
+    const isLast=remaining<=ITEMS_PER_PAGE;
+    const take=isLast?remaining:ITEMS_PER_PAGE;
     pages.push({items:items.slice(pIdx,pIdx+take),startIndex:pIdx,isLast});
     pIdx+=take;
     pDone=isLast;
   }while(!pDone);
   const totalPages=pages.length;
 
+  // ── ITEMS GRID (flexbox, not a table) ───────────────────────────────────
+  // The grid is a flex column. Every content row is a fixed-height flex row;
+  // the filler row has flex:1, so it *genuinely* grows to consume 100% of
+  // whatever space is left — no row-count math, no pixel calibration. This
+  // is what keeps the column dividers connected to the bottom border on
+  // every page, and what pins "Continued…"/Total to the very bottom edge.
+  const rowCells=(cells,extraClass)=>`<div class="ig-row${extraClass?(' '+extraClass):''}">${cells.map((c,i)=>`<div class="ig-cell ig-${['sl','desc','hsn','qty','rate','unit','amt'][i]}">${c}</div>`).join('')}</div>`;
+
   const buildTaxRowsHtml=()=>{
     let html='';
     if(cgstAmt>0){
-      html+=`<tr style="height:${ROW_HEIGHT}px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">CGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${cgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${cgstAmt.toFixed(2)}</td></tr>`;
-      html+=`<tr style="height:${ROW_HEIGHT}px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">SGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${sgstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${sgstAmt.toFixed(2)}</td></tr>`;
+      html+=rowCells(['', `<span style="float:right;font-style:italic;">CGST</span>`, '', `<span style="float:right;">${cgstRate}%</span>`, '', '', cgstAmt.toFixed(2)]);
+      html+=rowCells(['', `<span style="float:right;font-style:italic;">SGST</span>`, '', `<span style="float:right;">${sgstRate}%</span>`, '', '', sgstAmt.toFixed(2)]);
     }else if(igstAmt>0){
-      html+=`<tr style="height:${ROW_HEIGHT}px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">IGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">${igstRate}%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">${igstAmt.toFixed(2)}</td></tr>`;
+      html+=rowCells(['', `<span style="float:right;font-style:italic;">IGST</span>`, '', `<span style="float:right;">${igstRate}%</span>`, '', '', igstAmt.toFixed(2)]);
     }
     return html;
   };
@@ -3002,111 +2999,87 @@ function printInvoiceHtml(data){
       const rowNo=page.startIndex+i;
       const amt=parseFloat(item.amount||0).toFixed(2);
       const rate=parseFloat(item.rate||0).toFixed(2);
-      itemRowsHtml+=`<tr style="height:${ROW_HEIGHT}px;"><td style="border-right:1px solid #000;text-align:center;">${rowNo+1}</td><td style="border-right:1px solid #000;padding:2px 5px;"><strong>${item.desc||''}</strong></td><td style="border-right:1px solid #000;text-align:center;font-family:monospace;">${item.hsn||''}</td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;"><strong>${item.qty}</strong></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;">${rate}</td><td style="border-right:1px solid #000;text-align:center;">${item.unit||'Nos'}</td><td style="text-align:right;padding-right:4px;font-family:monospace;"><strong>${amt}</strong></td></tr>`;
+      itemRowsHtml+=rowCells([rowNo+1, `<strong>${item.desc||''}</strong>`, item.hsn||'', `<strong>${item.qty}</strong>`, rate, item.unit||'Nos', `<strong>${amt}</strong>`]);
     });
 
     const taxRowsHtml=page.isLast?buildTaxRowsHtml():'';
-    const filledRows=page.items.length+(page.isLast?taxRowCount:0);
-    // Non-last pages carry a much smaller footer (just the "Continued…" line
-    // instead of the full amount-in-words/bank-details/signature block), so
-    // they have extra vertical room to fill — pad with a calibrated number
-    // of additional blank rows so the column borders still reach the bottom.
-    const targetRows=page.isLast?(LAST_PAGE_TARGET_ROWS+taxRowCount):(ITEMS_PER_PAGE+NON_LAST_PAGE_EXTRA_ROWS);
-    const blankCount=Math.max(0,targetRows-filledRows);
-    // On non-last pages, the very last blank row is replaced with the
-    // "Continued on next page…" caption, spanning all columns. Keeping it
-    // as a real row *inside* the items-grid (rather than a separate row
-    // tacked onto the outer box below the grid) means the column dividers
-    // run right up to it with no disconnected gap at the bottom.
-    const plainBlankCount=page.isLast?blankCount:Math.max(0,blankCount-1);
-    let blankRowsHtml='';
-    for(let i=0;i<plainBlankCount;i++)blankRowsHtml+=`<tr style="height:${ROW_HEIGHT}px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>`;
-    if(!page.isLast)blankRowsHtml+=`<tr style="height:${ROW_HEIGHT}px;"><td colspan="7" style="text-align:center;font-size:9px;color:#555;font-style:italic;">…Continued on next page…</td></tr>`;
-
-
-    const totalRowHtml=page.isLast?`
-    <tfoot><tr style="border-top:1px solid #000;font-weight:bold;height:24px;">
-      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>
-      <td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td>
-      <td style="text-align:right;padding-right:4px;font-size:12px;">&#x20B9;${grandTotal.toFixed(2)}</td>
-    </tr></tfoot>`:'';
+    const captionHtml=page.isLast?'':`<div class="ig-row ig-caption"><div class="ig-cell ig-caption-cell">…Continued on next page…</div></div>`;
+    const totalRowHtml=page.isLast?rowCells(['', `<span style="float:right;">Total</span>`, '', '', '', '', `<span style="font-size:12px;">&#x20B9;${grandTotal.toFixed(2)}</span>`], 'ig-total'):'';
 
     const footerBlock=page.isLast?`
-<tr class="footer-block b-top b-bottom"><td colspan="2" style="padding:6px;">
+<div class="mb-row mb-words">
   <div style="font-size:9px;color:#555;text-transform:uppercase;font-weight:bold;">Amount Chargeable (in words):</div>
   <div class="bold" style="font-size:11px;margin-top:2px;">INR ${numberToWords(Math.round(grandTotal))}</div>
-</td></tr>
-<tr><td colspan="2" style="padding:0;">
-  <table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">
-    <tr style="vertical-align:bottom;">
-      <td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">
-        <div class="bold">Company's Bank Details:</div>
-        <div>Acct Name: <strong>${COMPANY.acctName}</strong></div>
-        <div>Bank Name: <strong>${COMPANY.bank}</strong></div>
-        <div>A/c No: <strong>${COMPANY.acctNo}</strong></div>
-        <div>Branch &amp; IFSC: <strong>${COMPANY.ifsc}</strong></div>
-        <div>UPI ID: <strong>${COMPANY.upi}</strong></div>
-        <div class="bold" style="margin-top:8px;font-size:9px;">Declaration:</div>
-        <div style="font-size:9px;color:#222;text-align:justify;">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. Goods once sold will not be taken back or exchanged.</div>
-      </td>
-      <td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">
-        <div style="font-size:10px;">For <strong>${COMPANY.name}</strong></div>
-        <div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>
-      </td>
-    </tr>
-  </table>
-</td></tr>`:'';
+</div>
+<div class="mb-row mb-bank">
+  <div class="mb-bank-left">
+    <div class="bold">Company's Bank Details:</div>
+    <div>Acct Name: <strong>${COMPANY.acctName}</strong></div>
+    <div>Bank Name: <strong>${COMPANY.bank}</strong></div>
+    <div>A/c No: <strong>${COMPANY.acctNo}</strong></div>
+    <div>Branch &amp; IFSC: <strong>${COMPANY.ifsc}</strong></div>
+    <div>UPI ID: <strong>${COMPANY.upi}</strong></div>
+    <div class="bold" style="margin-top:8px;font-size:9px;">Declaration:</div>
+    <div style="font-size:9px;color:#222;text-align:justify;">We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. Goods once sold will not be taken back or exchanged.</div>
+    <div style="font-size:9px;color:#222;text-align:justify;">SUBJECT TO MAHARASHTRA JURISDICTION</div> 	
+  </div>
+  <div class="mb-bank-right">
+    <div style="font-size:10px;">For <strong>${COMPANY.name}</strong></div>
+    <div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>
+  </div>
+</div>`:'';
 
     const titleSuffix=totalPages>1?` (PAGE ${pageIdx+1} OF ${totalPages})`:'';
 
     pagesHtml+=`<div class="pc${pageIdx<totalPages-1?' pc-break':''}">
-<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">TAX INVOICE${titleSuffix}</div>
-<table class="main-box" cellpadding="0" cellspacing="0">
-<tr class="b-bottom" style="height:75px;">
-  <td width="50%" class="b-right">
-    <div class="bold" style="font-size:12px;">${COMPANY.name}</div>
-    <div style="margin-top:3px;">${COMPANY.address}</div>
-    <div style="margin-top:3px;"><span class="bold">Ph:</span> ${COMPANY.phone} &nbsp;|&nbsp; <span class="bold">Email:</span> ${COMPANY.email}</div>
-    <div><span class="bold">Web:</span> ${COMPANY.website}</div>
-    <div style="margin-top:3px;">GSTIN/UIN: <strong>${COMPANY.gstin}</strong></div>
-    <div>State Name: <strong>${COMPANY.state}</strong>, Code: <strong>${COMPANY.stateCode}</strong></div>
-  </td>
-  <td width="50%" style="padding:0;">
-    <table class="inner-grid" cellpadding="0" cellspacing="0">
-      <tr class="b-bottom"><td class="b-right" width="50%">Invoice No.<br><strong>${data.invoiceNo||'-'}</strong></td><td width="50%">Dated<br><strong>${fmtD}</strong></td></tr>
-      <tr class="b-bottom"><td class="b-right">Delivery Note<br><strong>-</strong></td><td>Mode/Terms of Payment<br><strong>-</strong></td></tr>
-      <tr class="b-bottom"><td class="b-right">Challan No.<br><strong>${data.challanNo||'-'}</strong></td><td>Other Reference(s)<br><strong>-</strong></td></tr>
-      <tr><td class="b-right">Supplier's Ref.<br><strong>-</strong></td><td>Destination<br><strong>${data.buyerState||'-'}</strong></td></tr>
-    </table>
-  </td>
-</tr>
-<tr class="b-bottom" style="height:85px;">
-  <td colspan="2">
+<div class="pc-title">TAX INVOICE${titleSuffix}</div>
+<div class="main-box">
+  <div class="mb-row mb-header">
+    <div class="mb-col mb-company">
+      <div class="bold" style="font-size:12px;">${COMPANY.name}</div>
+      <div style="margin-top:3px;">${COMPANY.address}</div>
+      <div style="margin-top:3px;"><span class="bold">Ph:</span> ${COMPANY.phone} &nbsp;|&nbsp; <span class="bold">Email:</span> ${COMPANY.email}</div>
+      <div><span class="bold">Web:</span> ${COMPANY.website}</div>
+      <div style="margin-top:3px;">GSTIN/UIN: <strong>${COMPANY.gstin}</strong></div>
+      <div>State Name: <strong>${COMPANY.state}</strong>, Code: <strong>${COMPANY.stateCode}</strong></div>
+    </div>
+    <div class="mb-col mb-meta">
+      <div class="meta-row"><div class="meta-cell">Invoice No.<br><strong>${data.invoiceNo||'-'}</strong></div><div class="meta-cell meta-cell-last">Dated<br><strong>${fmtD}</strong></div></div>
+      <div class="meta-row"><div class="meta-cell">Delivery Note<br><strong>-</strong></div><div class="meta-cell meta-cell-last">Mode/Terms of Payment<br><strong>-</strong></div></div>
+      <div class="meta-row"><div class="meta-cell">Challan No.<br><strong>${data.challanNo||'-'}</strong></div><div class="meta-cell meta-cell-last">Other Reference(s)<br><strong>-</strong></div></div>
+      <div class="meta-row meta-row-last"><div class="meta-cell">Supplier's Ref.<br><strong>-</strong></div><div class="meta-cell meta-cell-last">Destination<br><strong>${data.buyerState||'-'}</strong></div></div>
+    </div>
+  </div>
+  <div class="mb-row mb-buyer">
     <div style="font-size:9px;text-transform:uppercase;color:#444;">Buyer (Bill To)</div>
     <div class="bold" style="margin-top:2px;font-size:12px;">${data.buyerName||'-'}</div>
     <div style="margin-top:2px;white-space:pre-line;">${data.buyerAddress||'-'}</div>
     <div style="margin-top:3px;">GSTIN/UIN: <strong>${data.buyerGstin||'Unregistered'}</strong>&nbsp;&nbsp;State: <strong>${data.buyerState||'Maharashtra'}</strong>, Code: <strong>${data.stateCode||'27'}</strong></div>
     <div style="margin-top:3px;font-size:10px;">${data.buyerPhone?`<span class="bold">Ph:</span> ${data.buyerPhone}`:''} ${data.buyerPhone&&data.buyerEmail?'&nbsp;|&nbsp;':''} ${data.buyerEmail?`<span class="bold">Email:</span> ${data.buyerEmail}`:''}</div>
-  </td>
-</tr>
-<tr style="height:100%;"><td colspan="2" style="padding:0;height:100%;">
-  <table class="items-grid" style="height:100%;">
-    <thead><tr>
-      <th width="6%" class="tc">Sl</th><th width="44%" style="text-align:left;">Description of Goods</th>
-      <th width="11%" class="tc">HSN/SAC</th><th width="10%" class="tr">Quantity</th>
-      <th width="10%" class="tr">Rate</th><th width="7%" class="tc">per</th>
-      <th width="12%" class="tr" style="border-right:none;">Amount</th>
-    </tr></thead>
-    <tbody>
-      ${itemRowsHtml}${taxRowsHtml}${blankRowsHtml}
-      <tr class="filler-row" style="height:0;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>
-    </tbody>${totalRowHtml}
-  </table>
-</td></tr>
-${footerBlock}
-</table>
-<div style="text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;">SUBJECT TO MAHARASHTRA JURISDICTION</div>
-<div style="text-align:center;font-size:9px;color:#555;margin-top:2px;">This is a Computer Generated Invoice</div>
+  </div>
+  <div class="mb-row mb-items">
+    <div class="items-grid">
+      <div class="ig-row ig-head-row">
+        <div class="ig-cell ig-head ig-sl">Sl</div>
+        <div class="ig-cell ig-head ig-desc" style="text-align:left;">Description of Goods</div>
+        <div class="ig-cell ig-head ig-hsn">HSN/SAC</div>
+        <div class="ig-cell ig-head ig-qty">Quantity</div>
+        <div class="ig-cell ig-head ig-rate">Rate</div>
+        <div class="ig-cell ig-head ig-unit">per</div>
+        <div class="ig-cell ig-head ig-amt" style="border-right:none;">Amount</div>
+      </div>
+      ${itemRowsHtml}${taxRowsHtml}
+      <div class="ig-row ig-filler">
+        <div class="ig-cell ig-sl"></div><div class="ig-cell ig-desc"></div><div class="ig-cell ig-hsn"></div>
+        <div class="ig-cell ig-qty"></div><div class="ig-cell ig-rate"></div><div class="ig-cell ig-unit"></div>
+        <div class="ig-cell ig-amt" style="border-right:none;"></div>
+      </div>
+      ${captionHtml}${totalRowHtml}
+    </div>
+  </div>
+  ${footerBlock}
+</div>
+<div class="pc-computer-gen">This is a Computer Generated Invoice</div>
 </div>`;
   });
 
@@ -3117,16 +3090,48 @@ html,body{margin:0;padding:0;width:210mm;}
 body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}
 .pc-break{page-break-after:always;break-after:page;}
-.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}
-.main-box td{vertical-align:top;padding:4px;}
-.inner-grid{width:100%;border-collapse:collapse;height:100%;}
-.inner-grid td{vertical-align:top;padding:3px 5px;}
-.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}
-.items-grid{width:100%;border-collapse:collapse;height:100%;}
-.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}
-.items-grid td{padding:1px 5px;font-size:11px;border-right:1px solid #000;}
-.items-grid th:last-child,.items-grid td:last-child{border-right:none;}
-.tr{text-align:right;}.tc{text-align:center;}.bold{font-weight:bold;}
+.pc-title{text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;flex-shrink:0;}
+.pc-jurisdiction{text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;flex-shrink:0;}
+.pc-computer-gen{text-align:center;font-size:9px;color:#555;margin-top:2px;flex-shrink:0;}
+
+/* ── main-box: nested flex column so every flex:1 child gets a genuine,
+   definite pixel height at every level (no percentage-height chain) ── */
+.main-box{border:2px solid #000;width:100%;margin-top:2px;flex:1;min-height:0;display:flex;flex-direction:column;box-sizing:border-box;}
+.mb-row{padding:4px;box-sizing:border-box;flex-shrink:0;}
+.mb-header{display:flex;border-bottom:1px solid #000;padding:0;}
+.mb-company{width:50%;border-right:1px solid #000;padding:4px;box-sizing:border-box;}
+.mb-meta{width:50%;box-sizing:border-box;}
+.meta-row{display:flex;border-bottom:1px solid #000;}
+.meta-row-last{border-bottom:none;}
+.meta-cell{width:50%;padding:3px 5px;box-sizing:border-box;border-right:1px solid #000;}
+.meta-cell-last{border-right:none;}
+.mb-buyer{border-bottom:1px solid #000;}
+.mb-items{flex:1;min-height:0;padding:0;display:flex;}
+.mb-words{border-top:1px solid #000;border-bottom:1px solid #000;padding:6px;}
+.mb-bank{display:flex;align-items:flex-end;padding:0;}
+.mb-bank-left{width:55%;border-right:1px solid #000;font-size:10px;padding:6px;box-sizing:border-box;}
+.mb-bank-right{width:45%;padding:6px;text-align:right;box-sizing:border-box;}
+
+/* ── items-grid: flex column filling .mb-items completely; the filler row
+   (flex:1) grows to consume whatever space is left, on every page,
+   regardless of item count or PDF rendering engine ── */
+.items-grid{display:flex;flex-direction:column;width:100%;flex:1;min-height:0;}
+.ig-row{display:flex;width:100%;flex-shrink:0;}
+.ig-cell{padding:1px 5px;font-size:11px;border-right:1px solid #000;box-sizing:border-box;overflow:hidden;}
+.ig-cell:last-child{border-right:none;}
+.ig-head{font-weight:bold;font-size:10px;border-bottom:1px solid #000;padding:5px;text-transform:uppercase;box-sizing:border-box;}
+.ig-sl{width:6%;text-align:center;}
+.ig-desc{width:44%;text-align:left;}
+.ig-hsn{width:11%;text-align:center;font-family:monospace;}
+.ig-qty{width:10%;text-align:right;font-family:monospace;}
+.ig-rate{width:10%;text-align:right;font-family:monospace;}
+.ig-unit{width:7%;text-align:center;}
+.ig-amt{width:12%;text-align:right;font-family:monospace;}
+.ig-filler{flex:1;min-height:0;}
+.ig-total{border-top:1px solid #000;font-weight:bold;}
+.ig-caption{}
+.ig-caption-cell{width:100%;text-align:center;font-size:9px;color:#555;font-style:italic;border-right:none;}
+.bold{font-weight:bold;}
 </style></head><body>
 ${pagesHtml}
 </body></html>`;
@@ -3135,37 +3140,7 @@ ${pagesHtml}
   const iframe=document.createElement('iframe');
   iframe.id='_print_frame';
   iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
-  iframe.onload=function(){
-    try{
-      const doc=iframe.contentDocument||iframe.contentWindow.document;
-      // The static blank-row padding above gets each page close to full.
-      // This closes whatever's left over by measuring the ACTUAL rendered
-      // gap in the real browser (real fonts, real line-wrapping) rather
-      // than guessing a fixed row count — so it stays correct even if
-      // content length, font rendering, or page shape changes.
-      doc.querySelectorAll('.pc').forEach(pc=>{
-        const mainBox=pc.querySelector('.main-box');
-        const grid=pc.querySelector('.items-grid');
-        const filler=grid&&grid.querySelector('tr.filler-row');
-        if(!mainBox||!grid||!filler)return;
-        filler.style.height='0px';
-        // On the last page, main-box also contains the amount-in-words /
-        // bank-details / signature block AFTER the items-grid — that block's
-        // own height must NOT be counted as "leftover" for the filler row,
-        // or the filler swallows the space the footer needs and the footer
-        // gets pushed off the bottom of the page (clipped by overflow:hidden).
-        // So the boundary is wherever that footer block starts; only when
-        // there's no footer block (non-last pages) do we fall back to
-        // main-box's own bottom edge.
-        const footerRow=pc.querySelector('.footer-block');
-        const availableBottom=footerRow?footerRow.getBoundingClientRect().top:(mainBox.getBoundingClientRect().bottom-2);
-        const gridBottom=grid.getBoundingClientRect().bottom;
-        const gap=availableBottom-gridBottom;
-        if(gap>0)filler.style.height=gap+'px';
-      });
-    }catch(e){/* if measurement fails for any reason, the static blank-row padding above still applies */}
-    setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);
-  };
+  iframe.onload=function(){setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);};
   document.body.appendChild(iframe);
   const iDoc=iframe.contentDocument||iframe.contentWindow.document;
   iDoc.open();iDoc.write(htmlContent);iDoc.close();
@@ -4788,7 +4763,7 @@ function buildCreditNoteHtml(data){
   }
 
   const filledRows=items.length+(cgstAmt>0?2:igstAmt>0?1:0);
-  const blankCount=Math.max(0,22-filledRows);
+  const blankCount=Math.max(0,23-filledRows);
   let blankRowsHtml='';
   for(let i=0;i<blankCount;i++)blankRowsHtml+=`<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>`;
 
