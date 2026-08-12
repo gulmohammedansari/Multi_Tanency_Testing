@@ -1,0 +1,2964 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// ENTERPRISES — Google Apps Script (SECURED VERSION V12)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// SET UP INSTRUCTIONS:
+// 1. Open your Google Sheet named "New Database_V11" (or your active sheet).
+// 2. Go to Extensions → Apps Script. Paste this code entirely.
+// 3. Click the Gear Icon (Project Settings) on the left sidebar.
+// 4. Under "Script Properties", click "Add script property" and add:
+//    - API_SECRET  → Optional. If set, login requires this secret in addition to username/password.
+//    - USER_admin  → Your desired password, e.g., admin123
+//    - DISPLAY_admin → Display name, e.g., Admin
+//    - COMPANY_EMAIL → (Optional) CC email for invoice copies, e.g., info@gmenterprises.com
+// 5. Click Deploy → New Deployment → Select "Web App".
+//    - Execute As: Me
+//    - Who has access: Anyone
+// 6. Copy the Web App URL and paste it into googleScriptUrl in all HTML files.
+//
+// EMAIL SETUP NOTE:
+//   Gmail sends the invoice PDF automatically once an invoice is saved.
+//   The buyer's email (from the invoice form) is used as the TO address.
+//   If COMPANY_EMAIL is set in Script Properties, a CC copy is also sent there.
+//   If buyer email is blank, the email step is silently skipped.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SESSION_TTL_SEC = 14400; // 4 Hours persistent session duration
+
+// Sheet configuration constants
+const SHEET_INVOICES = 'Invoices';
+const SHEET_CHALLANS = 'Challans';
+const SHEET_BUYERS   = 'Buyers';
+const SHEET_ITEMS    = 'Items';   // Products & Services master sheet
+const SHEET_QUOTATIONS = 'Quotations';
+const SHEET_CREDIT_DEBIT_NOTES = 'CreditDebitNotes';
+const SHEET_AMC      = 'AMC_Contracts'; // Annual Maintenance Contracts
+
+// ── MULTI-TENANCY ────────────────────────────────────────────────────────────
+// SHEET_TENANTS and SHEET_USERS always live in the spreadsheet this script is
+// bound to ("control spreadsheet") — every tenant's business data (Invoices,
+// Quotations, etc.) lives in ITS OWN separate spreadsheet, referenced by ID.
+// ACTIVE_SPREADSHEET_ID / COMPANY are set once per request (see
+// applyTenantContext) right after session validation, so none of the ~35
+// getSheet(SHEET_X) call sites elsewhere in this file need to change.
+const SHEET_TENANTS = 'Tenants';
+const SHEET_USERS   = 'Users';
+
+// Single source of truth for these two sheets' columns — used both when
+// creating the sheet fresh (appendRow) and to self-heal an existing
+// production sheet that predates a later field (see ensureHeaders()), so a
+// schema change never requires manually editing the live spreadsheet.
+// 'Buyer State' and 'State Code' are appended, not inserted: existing rows keep
+// their column positions. Without them a reprint had no record of the buyer's
+// state and fell back to Maharashtra / 27, so an out-of-state invoice reprinted
+// with the wrong place of supply — a Rule 46 field printed incorrectly.
+const INVOICE_HEADERS = [
+  'Invoice No', 'Date', 'Challan No', 'Buyer Name', 'Buyer Phone', 'Buyer Email',
+  'Buyer Address', 'Buyer GSTIN', 'Sub Total', 'CGST Rate', 'CGST Amount',
+  'SGST Rate', 'SGST Amount', 'IGST Rate', 'IGST Amount', 'Tax Amount',
+  'Grand Total', 'Items (JSON)', 'Saved By', 'Timestamp', 'Ship To (JSON)',
+  'Buyer State', 'State Code'
+];
+const TENANT_HEADERS = [
+  'Tenant ID', 'Company Name', 'Address', 'GSTIN', 'State', 'State Code',
+  'Phone', 'Email', 'Website', 'Bank', 'Acct Name', 'Acct No', 'IFSC', 'UPI',
+  'Spreadsheet ID', 'Status', 'Plan', 'Created Date', 'Logo', 'Signature', 'PAN'
+];
+const SUPER_ADMIN_SECRET_PROP = 'SUPER_ADMIN_SECRET';
+let ACTIVE_SPREADSHEET_ID = null;
+
+// Single source of truth for seller details used in all emailed PDF
+// templates (Invoice/Challan/Quotation) — mirrors the frontend's COMPANY
+// constant exactly, so the emailed PDF always matches what Reprint shows.
+// Default seller details, used for the primary/legacy tenant and as a
+// fallback. Overwritten per-request by applyTenantContext() from the
+// logged-in user's Tenant row — every print/email function below reads this
+// same COMPANY object, so none of them need to change for multi-tenancy.
+let COMPANY = {
+  name: 'ENTERPRISES',
+  address: '07/7A, Hans Roadf, , Jacob Circle, Mumbai Central, Mumbai - 411111',
+  gstin: '27ABCDE1234F1Z5', state: 'Maharashtra', stateCode: '27',
+  phone: '9862691203/9619231477', email: 'gmfirenterprises/gmengineerss@gmail.com',
+  website: 'www.itras.com', bank: 'KOTAK MAHINDRA BANK LTD',
+  acctName: 'ENTERPRISES', acctNo: '5949518744', ifsc: 'KKBK0001444', upi: '989265465894@ptaxis',
+  pan: '', logo: '', signature: ''
+};
+
+// ── UTILITIES ────────────────────────────────────────────────────────────────
+
+function jsonOut(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getProps() {
+  return PropertiesService.getScriptProperties().getProperties();
+}
+
+// Safely converts a GAS date value to YYYY-MM-DD string.
+// GAS auto-converts date cells in Sheets to JS Date objects, so we
+// cannot assume .date is always a string — guard against both cases.
+function gasDateToYMD(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    var y = val.getFullYear();
+    var m = String(val.getMonth() + 1).padStart(2, '0');
+    var d = String(val.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+  return String(val).trim();
+}
+
+function generateToken() {
+  return Utilities.getUuid().replace(/-/g, '') + Date.now().toString(36);
+}
+
+// Session validation with sliding expiration
+function validateSession(token) {
+  if (!token) return null;
+  const cache = CacheService.getScriptCache();
+  const sessionStr = cache.get(token);
+  if (!sessionStr) return null;
+  cache.put(token, sessionStr, SESSION_TTL_SEC); // Refresh TTL
+  return JSON.parse(sessionStr);
+}
+
+function validateLoginSecret(secret) {
+  const expected = getProps()['API_SECRET'] || '';
+  return expected === '' || secret === expected;
+}
+
+function validateSecret(secret) {
+  return validateLoginSecret(secret);
+}
+
+// ── MULTI-TENANCY HELPERS ──────────────────────────────────────────────────
+
+function generateSalt() {
+  return Utilities.getUuid().replace(/-/g, '');
+}
+
+function hashPassword(password, salt) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, (salt || '') + '::' + (password || ''));
+  return bytes.map(function(b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
+}
+
+// Applies the logged-in user's tenant to this request: every getSheet() call
+// for business-data sheets (Invoices, Quotations, etc.) will now resolve to
+// that tenant's own spreadsheet, and every print/email function will use
+// that tenant's own company/bank details. Call this once, right after
+// validateSession() succeeds, in both doGet and doPost.
+function applyTenantContext(session) {
+  if (!session) return;
+  ACTIVE_SPREADSHEET_ID = session.spreadsheetId || null;
+  if (session.company) COMPANY = session.company;
+}
+
+// Non-destructively brings an EXISTING sheet's header row up to date with a
+// newer expected column list — appends any missing header as a new trailing
+// column. Existing columns, their order, and all existing row data are never
+// touched; older rows simply read back blank for the new column. This is
+// what lets a schema change (e.g. this migration's Ship To / Logo / PAN
+// columns) reach a live production spreadsheet without anyone hand-editing
+// it first.
+function ensureHeaders(sheet, expectedHeaders) {
+  const lastCol = sheet.getLastColumn();
+  const existing = lastCol > 0
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h).trim(); })
+    : [];
+  const missing = expectedHeaders.filter(function(h) { return existing.indexOf(h) === -1; });
+  if (!missing.length) return;
+  const startCol = lastCol + 1;
+  const range = sheet.getRange(1, startCol, 1, missing.length);
+  range.setValues([missing]);
+  range.setFontWeight('bold').setBackground('#f1f5f9');
+}
+
+// Dynamic target sheet accessor with automated structural initialization
+function getSheet(name) {
+  const masterOnly = (name === SHEET_TENANTS || name === SHEET_USERS);
+  const ss = (!masterOnly && ACTIVE_SPREADSHEET_ID)
+    ? SpreadsheetApp.openById(ACTIVE_SPREADSHEET_ID)
+    : SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    if (name === SHEET_INVOICES) {
+      sheet.appendRow(INVOICE_HEADERS);
+    } else if (name === SHEET_CHALLANS) {
+      sheet.appendRow([
+        'Challan No', 'Date', 'Ref Invoice No', 'Buyer Name', 'Buyer Phone', 'Buyer Email',
+        'Buyer Address', 'Buyer GSTIN', 'Transport', 'Notes', 'Items (JSON)', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_BUYERS) {
+      sheet.appendRow([
+        'Name', 'Address', 'GSTIN', 'State', 'State Code', 'Phone', 'Email', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_ITEMS) {
+      sheet.appendRow([
+        'Name', 'Type', 'HSN', 'Unit', 'Rate', 'GST', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_QUOTATIONS) {
+      sheet.appendRow([
+        'Quotation No', 'Date', 'Valid Until', 'Ref No', 'Buyer Name', 'Buyer Phone', 'Buyer Email',
+        'Buyer Address', 'Buyer GSTIN', 'Buyer State', 'Sub Total', 'Tax Total', 'Grand Total',
+        'Notes', 'Items (JSON)', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_CREDIT_DEBIT_NOTES) {
+      sheet.appendRow([
+        'Note Type', 'Note No', 'Date', 'Against Invoice No', 'Against Invoice Date', 'Reason',
+        'Buyer Name', 'Buyer Phone', 'Buyer Email', 'Buyer Address', 'Buyer GSTIN', 'Buyer State',
+        'State Code', 'Sub Total', 'CGST Rate', 'CGST Amount', 'SGST Rate', 'SGST Amount',
+        'IGST Rate', 'IGST Amount', 'Tax Amount', 'Grand Total', 'Items (JSON)', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_AMC) {
+      sheet.appendRow([
+        'Contract No', 'Customer Name', 'Phone', 'Email', 'Service Description',
+        'Start Date', 'Expiry Date', 'AMC Value', 'Payment Frequency',
+        'Notes', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_CERTIFICATES) {
+      sheet.appendRow([
+        'Cert No', 'Cert Type', 'Issue Date', 'Valid Until', 'Ref No', 'Site',
+        'Recipient Name', 'Recipient Address', 'Recipient Phone', 'Recipient Email',
+        'Recipient GSTIN', 'Items (JSON)', 'Remarks', 'Saved By', 'Timestamp'
+      ]);
+    } else if (name === SHEET_TENANTS) {
+      sheet.appendRow(TENANT_HEADERS);
+    } else if (name === SHEET_USERS) {
+      sheet.appendRow([
+        'Username', 'Password Hash', 'Salt', 'Display Name', 'Tenant ID', 'Role',
+        'Status', 'Created Date'
+      ]);
+    }
+    sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight('bold').setBackground('#f1f5f9');
+    sheet.setFrozenRows(1);
+  } else if (name === SHEET_INVOICES) {
+    ensureHeaders(sheet, INVOICE_HEADERS);
+  } else if (name === SHEET_TENANTS) {
+    ensureHeaders(sheet, TENANT_HEADERS);
+  }
+  return sheet;
+}
+
+// ── GET ROUTER ───────────────────────────────────────────────────────────────
+
+function doGet(e) {
+  const p      = e.parameter || {};
+  const action = p.action || '';
+  const secret = p.secret || '';
+  const token  = p.token  || '';
+
+  try {
+    // checkLogin only needs secret (no session yet)
+    if (action === 'checkLogin') {
+      if (!validateLoginSecret(secret)) return jsonOut({ success: false, message: 'Unauthorized Request' });
+      return handleLogin(p.username || '', p.password || '');
+    }
+
+    // All other GET actions require a valid session token
+    const session = validateSession(token);
+    if (!session) return jsonOut({ success: false, message: 'Session expired. Please log in again.', sessionExpired: true });
+    applyTenantContext(session);
+
+    if (action === 'getNextChallanNo')  return handleGetNextChallanNo();
+    if (action === 'getChallanNos')     return handleGetChallanNos();
+    if (action === 'getChallansData')   return handleGetChallansData();
+    if (action === 'getInvoiceNos')     return handleGetInvoiceNos();
+    if (action === 'getInvoiceByNo')    return handleGetInvoiceByNo(p.invoiceNo || '');
+    if (action === 'getDashboard')      return handleGetDashboard();
+    if (action === 'searchBuyer')       return handleSearchBuyer(p.q || '');
+    if (action === 'getBuyers')         return handleGetBuyers();
+    if (action === 'getItems')          return handleGetItems();
+    if (action === 'getNextQuotationNo') return handleGetNextQuotationNo();
+    if (action === 'getQuotationsData')  return handleGetQuotationsData();
+    if (action === 'getQuotationByNo')   return handleGetQuotationByNo(p.quotNo || '');
+    if (action === 'getNextCreditDebitNoteNo') return handleGetNextCreditDebitNoteNo(p.noteType || 'CREDIT');
+    if (action === 'getCreditDebitNotesData')  return handleGetCreditDebitNotesData();
+    if (action === 'getCreditDebitNoteByNo')   return handleGetCreditDebitNoteByNo(p.noteNo || '');
+    if (action === 'getAMCData')         return handleGetAMCData();
+    if (action === 'getNextCertNo')        return handleGetNextCertNo();
+    if (action === 'getCertificates')      return handleGetCertificates();
+    if (action === 'getCompanyInfo')       return handleGetCompanyInfo();
+
+    return jsonOut({ success: false, message: 'Unknown action parameter' });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+// ── POST ROUTER ──────────────────────────────────────────────────────────────
+
+function doPost(e) {
+  try {
+    const body   = JSON.parse(e.postData.contents || '{}');
+    const action = body.action || '';
+    const token  = body.token  || '';
+
+    // Tenant provisioning happens BEFORE a session exists (a brand-new
+    // tenant has no user yet) — gated by a separate super-admin secret
+    // (Script Properties → SUPER_ADMIN_SECRET) instead of a login token.
+    if (action === 'provisionTenant') {
+      const suppliedSecret = body.secret || '';
+      const expectedSecret = getProps()[SUPER_ADMIN_SECRET_PROP] || '';
+      if (!expectedSecret || suppliedSecret !== expectedSecret) {
+        return jsonOut({ success: false, message: 'Unauthorized: invalid super-admin secret.' });
+      }
+      try {
+        const result = provisionTenant(body.data || {});
+        return jsonOut({ success: true, tenantId: result.tenantId, spreadsheetId: result.spreadsheetId });
+      } catch (provErr) {
+        return jsonOut({ success: false, message: provErr.toString() });
+      }
+    }
+
+    const session = validateSession(token);
+    if (!session) return jsonOut({ success: false, message: 'Session expired. Please log in again.', sessionExpired: true });
+    applyTenantContext(session);
+
+    if (action === 'addInvoice')        return handleAddInvoice(body.data, session.username);
+    if (action === 'updateInvoice')     return handleUpdateInvoice(body.data, body.originalInvoiceNo || '', session.username);
+    if (action === 'updateChallan')     return handleUpdateChallan(body, session.username);
+    if (action === 'addBuyer')          return handleAddBuyer(body.data, session.username);
+    if (action === 'addItem')           return handleAddItem(body.data, session.username);
+    if (action === 'saveBuyer')         return handleSaveBuyer(body, session.username);
+    if (action === 'saveChallan')       return handleSaveChallan(body, session.username);
+    if (action === 'saveQuotation')     return handleSaveQuotation(body, session.username);
+    if (action === 'saveCreditDebitNote') return handleSaveCreditDebitNote(body, session.username);
+    if (action === 'saveAMCContract')   return handleSaveAMCContract(body, session.username);
+    if (action === 'deleteAMCContract') return handleDeleteAMCContract(body, session.username);
+    if (action === 'saveCertificate')    return handleSaveCertificate(body, session.username);
+    if (action === 'emailInvoiceReport') return handleEmailInvoiceReport(body);
+    if (action === 'emailChallanReport') return handleEmailChallanReport(body);
+    if (action === 'saveCompanySettings') return handleSaveCompanySettings(body.data, session);
+
+    return jsonOut({ success: false, message: 'Unknown action parameter' });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+// ── AUTH HANDLER ─────────────────────────────────────────────────────────────
+
+function handleLogin(username, password) {
+  username = (username || '').trim().toLowerCase();
+  if (!username || !password) {
+    return jsonOut({ success: false, message: 'Username and password fields are mandatory.' });
+  }
+
+  const usersSheet = getSheet(SHEET_USERS);
+  const uData      = usersSheet.getDataRange().getValues();
+  const uHeaders   = uData[0];
+  let userRow = null;
+  for (let i = 1; i < uData.length; i++) {
+    if ((uData[i][0] || '').toString().trim().toLowerCase() === username) { userRow = uData[i]; break; }
+  }
+  if (!userRow) return jsonOut({ success: false, message: 'Invalid credentials provided.' });
+
+  const u = {};
+  uHeaders.forEach(function(h, j) { u[h] = userRow[j]; });
+
+  if ((u['Status'] || 'Active').toString().toLowerCase() === 'suspended') {
+    return jsonOut({ success: false, message: 'This account has been suspended. Contact support.' });
+  }
+
+  const computedHash = hashPassword(password, u['Salt'] || '');
+  if (computedHash !== (u['Password Hash'] || '')) {
+    return jsonOut({ success: false, message: 'Invalid credentials provided.' });
+  }
+
+  const tenantId    = (u['Tenant ID'] || '').toString().trim();
+  const tenantsSheet = getSheet(SHEET_TENANTS);
+  const tData        = tenantsSheet.getDataRange().getValues();
+  const tHeaders      = tData[0];
+  let tenantRow = null;
+  for (let i = 1; i < tData.length; i++) {
+    if ((tData[i][0] || '').toString().trim() === tenantId) { tenantRow = tData[i]; break; }
+  }
+  if (!tenantRow) return jsonOut({ success: false, message: 'Tenant account not found. Contact support.' });
+
+  const t = {};
+  tHeaders.forEach(function(h, j) { t[h] = tenantRow[j]; });
+
+  if ((t['Status'] || 'Active').toString().toLowerCase() !== 'active') {
+    return jsonOut({ success: false, message: 'This account is currently inactive. Contact support.' });
+  }
+
+  const company = {
+    name: t['Company Name'] || '', address: t['Address'] || '', gstin: t['GSTIN'] || '',
+    state: t['State'] || 'Maharashtra', stateCode: t['State Code'] || '27',
+    phone: t['Phone'] || '', email: t['Email'] || '', website: t['Website'] || '',
+    bank: t['Bank'] || '', acctName: t['Acct Name'] || '', acctNo: t['Acct No'] || '',
+    ifsc: t['IFSC'] || '', upi: t['UPI'] || '',
+    pan: t['PAN'] || '', logo: t['Logo'] || '', signature: t['Signature'] || ''
+  };
+
+  const token = generateToken();
+  const sessionData = {
+    username:      username,
+    displayName:   u['Display Name'] || username.toUpperCase(),
+    tenantId:      tenantId,
+    spreadsheetId: t['Spreadsheet ID'] || '',
+    role:          u['Role'] || 'Admin',
+    company:       company
+  };
+  CacheService.getScriptCache().put(token, JSON.stringify(sessionData), SESSION_TTL_SEC);
+  return jsonOut({
+    success:     true,
+    token:       token,
+    username:    username,
+    displayName: sessionData.displayName,
+    tenantId:    tenantId,
+    tenantName:  company.name,
+    company:     company
+  });
+}
+
+// Returns the current tenant's company/bank details — used by the frontend
+// on session-restore (page refresh) to repopulate the Sidebar + Settings
+// page without re-prompting login. applyTenantContext() has already set
+// COMPANY to the correct tenant's data before this runs (see doGet router).
+function handleGetCompanyInfo() {
+  return jsonOut({ success: true, company: COMPANY });
+}
+
+// Updates the calling tenant's own row in the (master-only) Tenants sheet —
+// used by the Settings page's Branding card. Only touches the three fields
+// it's given; every other tenant column (name, GSTIN, bank details, etc.) is
+// managed outside the app and is left untouched here.
+function handleSaveCompanySettings(data, session) {
+  data = data || {};
+  const tenantId = (session && session.tenantId) || '';
+  if (!tenantId) return jsonOut({ success: false, message: 'No tenant on this session.' });
+
+  const sheet = getSheet(SHEET_TENANTS);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idCol = headers.indexOf('Tenant ID');
+  let rowIdx = -1;
+  for (let i = 1; i < values.length; i++) {
+    if ((values[i][idCol] || '').toString().trim() === tenantId) { rowIdx = i; break; }
+  }
+  if (rowIdx === -1) return jsonOut({ success: false, message: 'Tenant not found.' });
+
+  const setCell = function(headerName, value) {
+    const col = headers.indexOf(headerName);
+    if (col === -1) return; // ensureHeaders() already ran via getSheet() above
+    sheet.getRange(rowIdx + 1, col + 1).setValue(value);
+  };
+  setCell('PAN', data.pan || '');
+  setCell('Logo', data.logo || '');
+  setCell('Signature', data.signature || '');
+
+  return jsonOut({ success: true });
+}
+
+// ── TENANT PROVISIONING ──────────────────────────────────────────────────────
+// Called via doPost action=provisionTenant (super-admin-secret gated), or
+// directly from the Apps Script editor. Creates a brand-new, fully isolated
+// Google Sheet for the tenant's business data and registers the tenant +
+// their first admin login in the control spreadsheet's Tenants/Users sheets.
+function provisionTenant(input) {
+  input = input || {};
+  if (!input.companyName)    throw new Error('companyName is required.');
+  if (!input.adminUsername)  throw new Error('adminUsername is required.');
+  if (!input.adminPassword)  throw new Error('adminPassword is required.');
+
+  const tenantId = 'T-' + Utilities.getUuid().replace(/-/g, '').substring(0, 10).toUpperCase();
+
+  const adminUsername = input.adminUsername.trim().toLowerCase();
+  const usersSheetChk  = getSheet(SHEET_USERS);
+  const existingUsers  = usersSheetChk.getDataRange().getValues();
+  const dupeUser = existingUsers.slice(1).some(function(r) {
+    return (r[0] || '').toString().trim().toLowerCase() === adminUsername;
+  });
+  if (dupeUser) throw new Error('Username "' + adminUsername + '" is already taken.');
+
+  // 1. Create a dedicated, fully isolated spreadsheet for this tenant's data.
+  const newSs = SpreadsheetApp.create(input.companyName + ' — GME InvoiceApp Data');
+  const newSpreadsheetId = newSs.getId();
+  try {
+    const defaultSheet = newSs.getSheetByName('Sheet1');
+    if (defaultSheet) newSs.deleteSheet(defaultSheet);
+  } catch (e) { /* non-fatal */ }
+
+  // 2. Register the tenant + their company/bank details (used on every
+  //    printed document and emailed PDF for this tenant).
+  const tenantsSheet = getSheet(SHEET_TENANTS);
+  tenantsSheet.appendRow([
+    tenantId, input.companyName || '', input.address || '', input.gstin || '',
+    input.state || 'Maharashtra', input.stateCode || '27', input.phone || '',
+    input.email || '', input.website || '', input.bank || '', input.acctName || '',
+    input.acctNo || '', input.ifsc || '', input.upi || '', newSpreadsheetId,
+    'Active', input.plan || 'Trial',
+    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+  ]);
+
+  // 3. Create their first admin login.
+  const salt = generateSalt();
+  const hash = hashPassword(input.adminPassword, salt);
+  const usersSheet = getSheet(SHEET_USERS);
+  usersSheet.appendRow([
+    adminUsername, hash, salt, input.adminDisplayName || input.adminUsername,
+    tenantId, 'Admin', 'Active',
+    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+  ]);
+
+  return { tenantId: tenantId, spreadsheetId: newSpreadsheetId };
+}
+
+// One-time migration helper — run manually from the Apps Script editor
+// (select this function → Run) after pasting this multi-tenant version in.
+// Registers Enterprises itself as the first tenant, pointing at THIS
+// bound spreadsheet (so no data has to move), and migrates every existing
+// USER_<username> / DISPLAY_<username> Script Property into a proper Users
+// row under that tenant — existing logins keep working unchanged.
+function bootstrapPrimaryTenant() {
+  const tenantsSheet = getSheet(SHEET_TENANTS);
+  const already = tenantsSheet.getDataRange().getValues().slice(1)
+    .some(function(r) { return (r[0] || '') === 'T-GME-PRIMARY'; });
+  if (already) { Logger.log('Primary tenant already bootstrapped — skipping.'); return; }
+
+  const tenantId = 'T-GME-PRIMARY';
+  const ownSpreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
+  tenantsSheet.appendRow([
+    tenantId, COMPANY.name, COMPANY.address, COMPANY.gstin, COMPANY.state, COMPANY.stateCode,
+    COMPANY.phone, COMPANY.email, COMPANY.website, COMPANY.bank, COMPANY.acctName,
+    COMPANY.acctNo, COMPANY.ifsc, COMPANY.upi, ownSpreadsheetId, 'Active', 'Owner',
+    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+  ]);
+
+  const props = getProps();
+  const usersSheet = getSheet(SHEET_USERS);
+  Object.keys(props).forEach(function(key) {
+    if (key.indexOf('USER_') === 0) {
+      const username      = key.substring(5).toLowerCase();
+      const plainPassword = props[key];
+      const displayName   = props['DISPLAY_' + username] || username.toUpperCase();
+      const salt = generateSalt();
+      const hash = hashPassword(plainPassword, salt);
+      usersSheet.appendRow([
+        username, hash, salt, displayName, tenantId, 'Admin', 'Active',
+        new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+      ]);
+      Logger.log('Migrated existing user: ' + username);
+    }
+  });
+  Logger.log('Primary tenant bootstrap complete. Tenant ID: ' + tenantId);
+}
+
+// ── CHALLAN NUMBER AUTO-INCREMENT ────────────────────────────────────────────
+//
+// Format: CH/YY-YY/NNN  e.g.  CH/26-27/001
+// Reads all existing challan numbers from the Challans sheet,
+// finds the highest sequence number, and returns next one.
+// Falls back to CH/FY/001 if sheet is empty.
+
+function handleGetNextChallanNo() {
+  try {
+    const sheet = getSheet(SHEET_CHALLANS);
+    const data  = sheet.getDataRange().getValues();
+
+    // Column A (index 0) = Challan No
+    const existingNos = data.slice(1)
+      .map(r => (r[0] || '').toString().trim())
+      .filter(v => v !== '');
+
+    // Determine current financial year suffix e.g. "26-27"
+    const now = new Date();
+    const yr  = now.getFullYear();
+    const mo  = now.getMonth() + 1; // 1-based
+    const fyStart = mo >= 4 ? yr : yr - 1;
+    const fyEnd   = fyStart + 1;
+    const fySuffix = String(fyStart).slice(-2) + '-' + String(fyEnd).slice(-2); // "26-27"
+    const prefix   = 'CH/' + fySuffix + '/';
+
+    // Find the highest sequence number for this FY
+    let maxSeq = 0;
+    existingNos.forEach(no => {
+      if (no.toUpperCase().startsWith(prefix.toUpperCase())) {
+        const parts = no.split('/');
+        const seq   = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const nextSeq = maxSeq + 1;
+    const challanNo = prefix + String(nextSeq).padStart(3, '0');
+
+    return jsonOut({ success: true, challanNo: challanNo });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+// ── CHALLAN HANDLERS ─────────────────────────────────────────────────────────
+
+function handleGetChallanNos() {
+  const sheet = getSheet(SHEET_CHALLANS);
+  const data  = sheet.getDataRange().getValues();
+  const nos   = data.slice(1).map(r => r[0]).filter(v => v && v.toString().trim());
+  return jsonOut({ challanNos: nos });
+}
+
+function handleGetChallansData() {
+  const sheet   = getSheet(SHEET_CHALLANS);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const challans = data.slice(1).map(row => {
+    const c = {};
+    headers.forEach((h, j) => c[h] = row[j]);
+    c['Challan No'] = c['Challan No'] || row[0] || '';
+    return c;
+  });
+  return jsonOut({ challans });
+}
+
+function handleSaveChallan(body, username) {
+  const sheet     = getSheet(SHEET_CHALLANS);
+  const allData   = sheet.getDataRange().getValues();
+  const challanNo = (body.challanNo || '').toString().trim();
+
+  if (!challanNo) return jsonOut({ success: false, message: 'Challan No. is required' });
+
+  const exists = allData.slice(1).some(r =>
+    (r[0] || '').toString().trim().toLowerCase() === challanNo.toLowerCase()
+  );
+  if (exists) return jsonOut({ success: false, message: 'Duplicate challan number — ' + challanNo + ' already exists' });
+
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  sheet.appendRow([
+    challanNo,
+    body.date          || '',
+    body.refInvoiceNo  || '',
+    body.buyerName     || '',
+    body.buyerPhone    || '',
+    body.buyerEmail    || '',
+    body.buyerAddress  || '',
+    body.buyerGstin    || '',
+    body.transport     || '',
+    body.notes         || '',
+    body.itemsJson     || '[]',
+    username,
+    now
+  ]);
+
+  // ── AUTO EMAIL TRIGGER ───────────────────────────────────────────────────
+  const emailPayload = {
+    challanNo:    challanNo,
+    date:         body.date          || '',
+    refInvoiceNo: body.refInvoiceNo  || '',
+    buyerName:    body.buyerName     || '',
+    buyerPhone:   body.buyerPhone    || '',
+    buyerEmail:   body.buyerEmail    || '',
+    buyerAddress: body.buyerAddress  || '',
+    buyerGstin:   body.buyerGstin    || '',
+    items:        JSON.parse(body.itemsJson || '[]')
+  };
+
+  var emailSent    = false;
+  var emailMessage = '';
+  try {
+    var emailResult = sendChallanEmail(emailPayload);
+    emailSent    = emailResult.sent;
+    emailMessage = emailResult.message;
+  } catch (emailErr) {
+    emailMessage = emailErr.toString();
+    Logger.log('Challan email error: ' + emailMessage);
+  }
+
+  return jsonOut({ success: true, emailSent: emailSent, emailMessage: emailMessage });
+}
+
+// Updates an existing challan row in place (overwrite, no new row, no re-email).
+// Matched by originalChallanNo so it still works even if the challan number
+// itself was corrected during editing.
+function handleUpdateChallan(body, username) {
+  const sheet   = getSheet(SHEET_CHALLANS);
+  const allData = sheet.getDataRange().getValues();
+  const orig    = (body.originalChallanNo || '').toString().trim().toLowerCase();
+  if (!orig) return jsonOut({ success: false, message: 'Missing original challan reference.' });
+
+  let rowIdx = -1;
+  for (let i = 1; i < allData.length; i++) {
+    if ((allData[i][0] || '').toString().trim().toLowerCase() === orig) { rowIdx = i; break; }
+  }
+  if (rowIdx === -1) return jsonOut({ success: false, message: 'Original challan not found — it may have been deleted.' });
+
+  const newChallanNo = (body.challanNo || '').toString().trim();
+  if (!newChallanNo) return jsonOut({ success: false, message: 'Challan No. is required' });
+  if (newChallanNo.toLowerCase() !== orig) {
+    const clash = allData.some((r, i) => i > 0 && i !== rowIdx &&
+      (r[0] || '').toString().trim().toLowerCase() === newChallanNo.toLowerCase());
+    if (clash) return jsonOut({ success: false, message: 'Duplicate challan number — ' + newChallanNo + ' already exists' });
+  }
+
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  sheet.getRange(rowIdx + 1, 1, 1, 13).setValues([[
+    newChallanNo,
+    body.date          || '',
+    body.refInvoiceNo  || '',
+    body.buyerName     || '',
+    body.buyerPhone    || '',
+    body.buyerEmail    || '',
+    body.buyerAddress  || '',
+    body.buyerGstin    || '',
+    body.transport     || '',
+    body.notes         || '',
+    body.itemsJson     || '[]',
+    username,
+    now
+  ]]);
+
+  return jsonOut({ success: true });
+}
+
+// ── INVOICE HANDLERS ─────────────────────────────────────────────────────────
+
+function handleGetInvoiceNos() {
+  const sheet = getSheet(SHEET_INVOICES);
+  const data  = sheet.getDataRange().getValues();
+  const nos   = data.slice(1).map(r => r[0]).filter(v => v && v.toString().trim());
+  return jsonOut({ invoiceNos: nos });
+}
+
+function handleGetInvoiceByNo(invoiceNo) {
+  const sheet   = getSheet(SHEET_INVOICES);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  for (let i = 1; i < data.length; i++) {
+    if ((data[i][0] || '').toString().trim().toLowerCase() === invoiceNo.toLowerCase()) {
+      const inv = {};
+      headers.forEach((h, j) => inv[h] = data[i][j]);
+      // Guarantee this key exists even if the sheet's header cell text
+      // doesn't exactly match "Invoice No" (extra space, different wording,
+      // etc.) — column A is always the invoice number by convention.
+      inv['Invoice No'] = inv['Invoice No'] || data[i][0] || '';
+      return jsonOut({ invoice: inv });
+    }
+  }
+  return jsonOut({ invoice: null });
+}
+
+function handleGetDashboard() {
+  const sheet   = getSheet(SHEET_INVOICES);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const invoices = data.slice(1).map(row => {
+    const inv = {};
+    headers.forEach((h, j) => inv[h] = row[j]);
+    // Guarantee this key exists even if the sheet's header cell text
+    // doesn't exactly match "Invoice No" (extra space, different wording,
+    // etc.) — column A is always the invoice number by convention.
+    inv['Invoice No'] = inv['Invoice No'] || row[0] || '';
+    return inv;
+  });
+  return jsonOut({ invoices });
+}
+
+function handleAddInvoice(data, username) {
+  const sheet   = getSheet(SHEET_INVOICES);
+  const allData = sheet.getDataRange().getValues();
+  const exists  = allData.slice(1).some(r =>
+    (r[0] || '').toString().trim().toLowerCase() === (data.invoiceNo || '').toLowerCase()
+  );
+  if (exists) return jsonOut({ result: 'duplicate' });
+
+  const now       = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const itemsJson = JSON.stringify(data.items || []);
+  // A small envelope rather than just the address — bundles the tax-mode
+  // choice (auto/intra/inter) in with ship-to, so a reprint or edit later
+  // reproduces the exact same GST treatment without a second new column.
+  const shipToJson = JSON.stringify({
+    shipTo: data.shipTo || null,
+    sameShip: data.sameShip !== false,
+    taxMode: data.taxMode || 'auto'
+  });
+
+  sheet.appendRow([
+    data.invoiceNo    || '',
+    data.date         || '',
+    data.challanNo    || '',
+    data.buyerName    || '',
+    data.buyerPhone   || '',
+    data.buyerEmail   || '',
+    data.buyerAddress || '',
+    data.buyerGstin   || '',
+    data.subTotal     || 0,
+    data.cgstRate     || 0,
+    data.cgstAmount   || 0,
+    data.sgstRate     || 0,
+    data.sgstAmount   || 0,
+    data.igstRate     || 0,
+    data.igstAmount   || 0,
+    data.taxAmount    || 0,
+    data.grandTotal   || 0,
+    itemsJson,
+    username,
+    now,
+    shipToJson,
+    data.buyerState   || '',
+    data.stateCode    || ''
+  ]);
+
+  // ── AUTO EMAIL TRIGGER ───────────────────────────────────────────────────
+  // Build a clean, explicit email payload — do NOT pass `data` directly,
+  // as `data.items` may have already been consumed/serialised above.
+  // We reconstruct all fields and parse items back from the JSON string we just made.
+  const emailPayload = {
+    invoiceNo:    data.invoiceNo    || '',
+    date:         data.date         || '',
+    challanNo:    data.challanNo    || '',
+    buyerName:    data.buyerName    || '',
+    buyerPhone:   data.buyerPhone   || '',
+    buyerEmail:   data.buyerEmail   || '',
+    buyerAddress: data.buyerAddress || '',
+    buyerGstin:   data.buyerGstin   || '',
+    buyerState:   data.buyerState   || data.state || '',
+    stateCode:    data.stateCode    || '',
+    subTotal:     data.subTotal     || 0,
+    cgstRate:     data.cgstRate     || 0,
+    sgstRate:     data.sgstRate     || 0,
+    igstRate:     data.igstRate     || 0,
+    cgstAmount:   data.cgstAmount   || 0,
+    sgstAmount:   data.sgstAmount   || 0,
+    igstAmount:   data.igstAmount   || 0,
+    taxAmount:    data.taxAmount    || 0,
+    grandTotal:   data.grandTotal   || 0,
+    shipTo:       data.sameShip === false ? (data.shipTo || null) : null,
+    taxMode:      data.taxMode      || 'auto',
+    items:        JSON.parse(itemsJson)   // parse back from the string we already built
+  };
+
+  let emailSent    = false;
+  let emailMessage = '';
+  try {
+    const emailResult = sendInvoiceEmail(emailPayload);
+    emailSent    = emailResult.sent;
+    emailMessage = emailResult.message;
+  } catch (emailErr) {
+    emailMessage = emailErr.toString();
+    Logger.log('Invoice email error: ' + emailMessage);
+  }
+
+  return jsonOut({ result: 'success', emailSent: emailSent, emailMessage: emailMessage });
+}
+
+// Updates an existing invoice row in place (overwrite, no new row, no re-email).
+// Matched by originalInvoiceNo so it still works even if the invoice number
+// itself was corrected during editing.
+function handleUpdateInvoice(data, originalInvoiceNo, username) {
+  const sheet   = getSheet(SHEET_INVOICES);
+  const allData = sheet.getDataRange().getValues();
+  const orig    = (originalInvoiceNo || '').toString().trim().toLowerCase();
+  if (!orig) return jsonOut({ result: 'notfound', message: 'Missing original invoice reference.' });
+
+  let rowIdx = -1;
+  for (let i = 1; i < allData.length; i++) {
+    if ((allData[i][0] || '').toString().trim().toLowerCase() === orig) { rowIdx = i; break; }
+  }
+  if (rowIdx === -1) return jsonOut({ result: 'notfound', message: 'Original invoice not found — it may have been deleted.' });
+
+  const newInvoiceNo = (data.invoiceNo || '').toString().trim();
+  if (!newInvoiceNo) return jsonOut({ result: 'error', message: 'Invoice No. is required' });
+  if (newInvoiceNo.toLowerCase() !== orig) {
+    const clash = allData.some((r, i) => i > 0 && i !== rowIdx &&
+      (r[0] || '').toString().trim().toLowerCase() === newInvoiceNo.toLowerCase());
+    if (clash) return jsonOut({ result: 'duplicate' });
+  }
+
+  const now       = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const itemsJson = JSON.stringify(data.items || []);
+  const shipToJson = JSON.stringify({
+    shipTo: data.shipTo || null,
+    sameShip: data.sameShip !== false,
+    taxMode: data.taxMode || 'auto'
+  });
+
+  sheet.getRange(rowIdx + 1, 1, 1, INVOICE_HEADERS.length).setValues([[
+    newInvoiceNo,
+    data.date         || '',
+    data.challanNo    || '',
+    data.buyerName    || '',
+    data.buyerPhone   || '',
+    data.buyerEmail   || '',
+    data.buyerAddress || '',
+    data.buyerGstin   || '',
+    data.subTotal     || 0,
+    data.cgstRate     || 0,
+    data.cgstAmount   || 0,
+    data.sgstRate     || 0,
+    data.sgstAmount   || 0,
+    data.igstRate     || 0,
+    data.igstAmount   || 0,
+    data.taxAmount    || 0,
+    data.grandTotal   || 0,
+    itemsJson,
+    username,
+    now,
+    shipToJson,
+    data.buyerState   || '',
+    data.stateCode    || ''
+  ]]);
+
+  return jsonOut({ result: 'success' });
+}
+
+// ── BUYER HANDLERS ───────────────────────────────────────────────────────────
+
+function handleSearchBuyer(q) {
+  const sheet   = getSheet(SHEET_BUYERS);
+  const data    = sheet.getDataRange().getValues();
+  if (data.length < 2) return jsonOut({ buyers: [] });
+  const headers = data[0];
+  const ql      = q.toLowerCase();
+  const buyers  = data.slice(1)
+    .filter(r => (r[0] || '').toString().toLowerCase().includes(ql))
+    .map(row => {
+      const b = {};
+      headers.forEach((h, j) => b[h] = row[j]);
+      return b;
+    });
+  return jsonOut({ buyers });
+}
+
+function handleGetBuyers() {
+  const sheet   = getSheet(SHEET_BUYERS);
+  const data    = sheet.getDataRange().getValues();
+  if (data.length < 2) return jsonOut({ buyers: [] });
+  const headers = data[0];
+  const buyers  = data.slice(1).map(row => {
+    const b = {};
+    headers.forEach((h, j) => b[h] = row[j]);
+    return b;
+  });
+  return jsonOut({ buyers });
+}
+
+function handleAddBuyer(data, username) {
+  const sheet   = getSheet(SHEET_BUYERS);
+  const allData = sheet.getDataRange().getValues();
+  const nameLC  = (data.name || '').toLowerCase();
+  const rowIdx  = allData.slice(1).findIndex(r => (r[0] || '').toString().toLowerCase() === nameLC);
+  const now     = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const row = [
+    data.name       || '',
+    data.address    || '',
+    data.gstin      || '',
+    data.state      || '',
+    data.stateCode  || '',
+    data.phone      || '',
+    data.email      || '',
+    username,
+    now
+  ];
+  if (rowIdx >= 0) {
+    sheet.getRange(rowIdx + 2, 1, 1, row.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+  return jsonOut({ result: 'success' });
+}
+
+function handleSaveBuyer(body, username) {
+  return handleAddBuyer({
+    name:      body.name      || '',
+    address:   body.address   || '',
+    gstin:     body.gstin     || '',
+    state:     body.state     || '',
+    stateCode: body.stateCode || '',
+    phone:     body.phone     || '',
+    email:     body.email     || ''
+  }, username);
+}
+
+// ── ITEMS / PRODUCTS / SERVICES HANDLERS ─────────────────────────────────────
+//
+// Sheet: "Items"
+// Columns: Name | Type | HSN | Unit | Rate | GST | Saved By | Timestamp
+//
+// handleGetItems  — GET  action=getItems   → returns all rows as JSON array
+// handleAddItem   — POST action=addItem    → upserts by Name (case-insensitive)
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+function handleGetItems() {
+  const sheet = getSheet(SHEET_ITEMS);
+  const data  = sheet.getDataRange().getValues();
+  if (data.length < 2) return jsonOut({ items: [] });
+  const headers = data[0];
+  const items = data.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, j) => obj[h] = row[j]);
+    return obj;
+  });
+  return jsonOut({ items: items });
+}
+
+function handleAddItem(data, username) {
+  const sheet   = getSheet(SHEET_ITEMS);
+  const allData = sheet.getDataRange().getValues();
+  const nameLC  = (data.name || '').toLowerCase();
+  const rowIdx  = allData.slice(1).findIndex(r => (r[0] || '').toString().toLowerCase() === nameLC);
+  const now     = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const row = [
+    data.name  || '',
+    data.type  || 'Service',
+    data.hsn   || '',
+    data.unit  || 'Nos',
+    data.rate  || 0,
+    data.gst   || 18,
+    username,
+    now
+  ];
+  if (rowIdx >= 0) {
+    // Update existing item (upsert by name)
+    sheet.getRange(rowIdx + 2, 1, 1, row.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+  return jsonOut({ result: 'success' });
+}
+
+// Ensure Items sheet has the correct header row
+// (called automatically by getSheet() if sheet is newly created)
+function ensureItemsSheetHeaders(sheet) {
+  const headers = sheet.getRange(1, 1, 1, 8).getValues()[0];
+  if (!headers[0]) {
+    sheet.getRange(1, 1, 1, 8).setValues([[
+      'Name', 'Type', 'HSN', 'Unit', 'Rate', 'GST', 'Saved By', 'Timestamp'
+    ]]);
+    sheet.setFrozenRows(1);
+    // Bold header row
+    sheet.getRange(1, 1, 1, 8).setFontWeight('bold');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO EMAIL — INVOICE PDF SENDER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Fires automatically after every successful invoice save.
+// Builds a self-contained inline-CSS HTML invoice, converts it to PDF
+// via Utilities.newBlob().getAs('application/pdf'), and sends it to the
+// fixed SELLER_EMAIL address (itransform007@gmail.com) via MailApp.
+//
+// No buyer email is used — the PDF goes to the seller only.
+//
+// Called by handleAddInvoice() after sheet.appendRow() succeeds.
+// Returns: { sent: true/false, message: string }
+// ─────────────────────────────────────────────────────────────────────────
+
+function sendInvoiceEmail(data) {
+  // Fixed seller email — invoice PDF always goes here
+  const SELLER_EMAIL = 'itransform007@gmail.com';
+
+  // ── Build invoice HTML ───────────────────────────────────────────────────
+  const htmlContent = buildInvoiceHtml(data);
+
+  const safeInvoiceNo = (data.invoiceNo || 'Invoice').replace(/\//g, '-');
+  const safeBuyerName = (data.buyerName || 'Buyer').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const pdfFileName   = safeBuyerName + ' - ' + safeInvoiceNo + '.pdf';
+
+  // ── Convert HTML → PDF via DriveApp temp file ───────────────────────────
+  // FIX: Utilities.newBlob().getAs('application/pdf') does NOT work in GAS.
+  // getAs() for PDF conversion only works on DriveApp File objects.
+  // Correct approach: write HTML to a temp Drive file, export as PDF, then trash it.
+  var tempFile = null;
+  var pdfBlob;
+  try {
+    tempFile = DriveApp.createFile(
+      Utilities.newBlob(htmlContent, 'text/html', 'temp_invoice.html')
+    );
+    pdfBlob = tempFile.getAs('application/pdf');
+    pdfBlob.setName(pdfFileName);
+  } finally {
+    if (tempFile) {
+      try { tempFile.setTrashed(true); } catch(e) { Logger.log('Temp file cleanup: ' + e); }
+    }
+  }
+
+  // ── Format email subject & body ─────────────────────────────────────────
+  const subject = 'New Invoice Saved: ' + (data.invoiceNo || '') + ' | ' + (data.buyerName || 'Unknown Buyer');
+
+  const rawDate = gasDateToYMD(data.date);
+  const fmtDate = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+
+  const grandTotalFormatted = 'Rs.' + parseFloat(data.grandTotal || 0).toFixed(2);
+
+  const emailBody =
+    'A new invoice has been saved to Google Sheets.\n\n' +
+    'Invoice Details:\n' +
+    '  Invoice No. : ' + (data.invoiceNo || '-') + '\n' +
+    '  Date        : ' + fmtDate + '\n' +
+    '  Buyer Name  : ' + (data.buyerName || '-') + '\n' +
+    '  Buyer GSTIN : ' + (data.buyerGstin || 'Unregistered') + '\n' +
+    '  Grand Total : ' + grandTotalFormatted + '\n' +
+    (data.challanNo ? '  Challan No. : ' + data.challanNo + '\n' : '') +
+    '\nPlease find the invoice PDF attached.\n\n' +
+    '-- Enterprises Invoice System';
+
+  // ── Send email to seller ────────────────────────────────────────────────
+  MailApp.sendEmail(SELLER_EMAIL, subject, emailBody, {
+    name:        'Enterprises — Invoice System',
+    attachments: [pdfBlob]
+  });
+
+  Logger.log('Invoice email sent to seller ' + SELLER_EMAIL + ' for ' + (data.invoiceNo || ''));
+  return { sent: true, message: 'Email sent to ' + SELLER_EMAIL };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BUILD INVOICE HTML  (self-contained inline-CSS — same Tally layout)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Per-line GST — each item carries its own gstPct, and CGST/SGST vs IGST is
+// decided by comparing seller/buyer state codes (or an explicit override),
+// exactly like the browser-side print engine (renderInvoicePages() in the
+// frontend). Mirroring that logic here is what keeps the emailed PDF
+// consistent with what Print/Reprint show on screen.
+function computeInvoiceLineCalc(data) {
+  const items = (data.items || []).filter(function(it){ return it && it.desc && String(it.desc).trim() !== ''; });
+  const mode = data.taxMode || 'auto';
+  let intra;
+  if (mode === 'intra') intra = true;
+  else if (mode === 'inter') intra = false;
+  else {
+    const a = String(COMPANY.stateCode || ''), b = String(data.stateCode || '');
+    intra = Boolean(a && b && a === b);
+  }
+  const lines = items.map(function(it) {
+    const qty = parseFloat(it.qty || 0), rate = parseFloat(it.rate || 0);
+    const taxable = Math.round(qty * rate * 100) / 100;
+    const gstPct = parseFloat(it.gstPct != null ? it.gstPct : 18);
+    const cgst = intra ? Math.round(taxable * gstPct / 200 * 100) / 100 : 0;
+    const sgst = intra ? Math.round(taxable * gstPct / 200 * 100) / 100 : 0;
+    const igst = intra ? 0 : Math.round(taxable * gstPct / 100 * 100) / 100;
+    return { desc: it.desc, hsn: it.hsn, unit: it.unit, qty: qty, rate: rate, taxable: taxable,
+             gstPct: gstPct, cgst: cgst, sgst: sgst, igst: igst };
+  });
+  const sum = function(k) { return Math.round(lines.reduce(function(a, l) { return a + l[k]; }, 0) * 100) / 100; };
+  const taxable = sum('taxable'), cgst = sum('cgst'), sgst = sum('sgst'), igst = sum('igst');
+  const totalTax = Math.round((cgst + sgst + igst) * 100) / 100;
+  const beforeRound = Math.round((taxable + totalTax) * 100) / 100;
+  const grandTotal = Math.round(beforeRound);
+  const roundOff = Math.round((grandTotal - beforeRound) * 100) / 100;
+
+  const build = function(keyFn) {
+    const map = {}, order = [];
+    lines.forEach(function(l) {
+      const k = keyFn(l);
+      if (!map[k]) { map[k] = { hsn: l.hsn, gstPct: l.gstPct, taxable: 0, cgst: 0, sgst: 0, igst: 0 }; order.push(k); }
+      map[k].taxable += l.taxable; map[k].cgst += l.cgst; map[k].sgst += l.sgst; map[k].igst += l.igst;
+    });
+    return order.map(function(k) { return map[k]; });
+  };
+  let groups = build(function(l) { return l.hsn + '|' + l.gstPct; });
+  if (groups.length > 8) {
+    groups = build(function(l) { return String(l.gstPct); });
+    groups.forEach(function(g) { g.hsn = 'Various'; });
+  }
+  groups.forEach(function(g) { g.tax = Math.round((g.cgst + g.sgst + g.igst) * 100) / 100; });
+  groups.sort(function(a, b) { return a.gstPct - b.gstPct || String(a.hsn).localeCompare(String(b.hsn)); });
+
+  return { items: items, lines: lines, intra: intra, taxable: taxable, cgst: cgst, sgst: sgst, igst: igst,
+           totalTax: totalTax, grandTotal: grandTotal, roundOff: roundOff, groups: groups };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMAILED INVOICE PDF — layout matched to the browser print engine
+//
+// The browser prints from LedgerPrint (index.html). This function produces the
+// PDF that gets emailed. Both must lay out the same invoice the same way, so
+// both are driven by the same millimetre constants and the same pagination
+// rules, reproduced below.
+//
+// One thing does NOT carry across: the CSS mechanics. The browser engine uses
+// a flex column with mm block heights. This output goes through Google Drive's
+// HTML-to-PDF converter, which does not handle flexbox or percentage heights
+// reliably, so the same geometry is expressed as plain tables with explicit
+// pixel heights converted from the shared mm figures. Numbers are shared;
+// only the markup differs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Shared print geometry, millimetres. Keep in step with GEO in index.html.
+var INV_GEO = {
+  pageH: 279, pageW: 194,
+  titleH: 7, sellerH: 22, partiesH: 28, stripH: 6, contStripH: 12,
+  tableHeadH: 6, rowH: 4.8, metaRowH: 3.2,
+  taxHeadH: 5.2, taxRowH: 4.6, taxFootH: 5,
+  totalsH: 24, wordsH: 9, bankH: 22, pageFootH: 5,
+  pageBorder: 0.4, cellPadX: 1.2, descFontPt: 7.5, maxRowUnits: 3
+};
+var MM_TO_PX = 3.779528;               // 96 dpi, what the converter assumes
+function invPx(mm) { return Math.round(mm * MM_TO_PX * 100) / 100; }
+
+// Arial / Helvetica advance widths, units per 1000 em. Line counts are derived
+// from these so a long description consumes the same number of row slots here
+// as it does in the browser, and the two never split pages differently.
+var INV_AFM = (function () {
+  var w = { 32:278,33:278,34:355,35:556,36:556,37:889,38:667,39:191,40:333,41:333,
+    42:389,43:584,44:278,45:333,46:278,47:278,58:278,59:278,60:584,61:584,62:584,
+    63:556,64:1015,91:278,92:278,93:278,94:469,95:556,96:333,123:334,124:260,125:334,126:584 };
+  '0123456789'.split('').forEach(function (c) { w[c.charCodeAt(0)] = 556; });
+  var up = { A:667,B:667,C:722,D:722,E:667,F:611,G:778,H:722,I:278,J:500,K:667,L:556,
+    M:833,N:722,O:778,P:667,Q:778,R:722,S:667,T:611,U:722,V:667,W:944,X:667,Y:667,Z:611 };
+  var lo = { a:556,b:556,c:500,d:556,e:556,f:278,g:556,h:556,i:222,j:222,k:500,l:222,
+    m:833,n:556,o:556,p:556,q:556,r:333,s:500,t:278,u:556,v:500,w:722,x:500,y:500,z:500 };
+  Object.keys(up).forEach(function (c) { w[c.charCodeAt(0)] = up[c]; });
+  Object.keys(lo).forEach(function (c) { w[c.charCodeAt(0)] = lo[c]; });
+  return w;
+})();
+
+function invTextWidthMM(text, fontPt) {
+  var s = String(text == null ? '' : text), u = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    u += (INV_AFM[c] === undefined ? 556 : INV_AFM[c]);
+  }
+  return u / 1000 * fontPt * 0.352778;
+}
+
+function invWrappedLineCount(text, widthMM, fontPt) {
+  var words = String(text == null ? '' : text).trim().split(/\s+/).filter(function (w) { return w; });
+  if (!words.length) return 1;
+  var space = invTextWidthMM(' ', fontPt), lines = 1, used = 0;
+  for (var i = 0; i < words.length; i++) {
+    var w = invTextWidthMM(words[i], fontPt);
+    if (w > widthMM) {
+      if (used > 0) { lines++; used = 0; }
+      var rows = Math.ceil(w / widthMM);
+      lines += rows - 1;
+      used = w - (rows - 1) * widthMM;
+      continue;
+    }
+    var add = used === 0 ? w : space + w;
+    if (used + add > widthMM) { lines++; used = w; } else { used += add; }
+  }
+  return lines;
+}
+
+function invDescWidthMM() {
+  return (INV_GEO.pageW - 2 * INV_GEO.pageBorder) * 43 / 100 - 2 * INV_GEO.cellPadX;
+}
+function invRowUnits(line) {
+  return Math.min(INV_GEO.maxRowUnits,
+    Math.max(1, invWrappedLineCount(line.desc, invDescWidthMM(), INV_GEO.descFontPt)));
+}
+
+// ── page arithmetic, identical to the browser engine ───────────────────────
+function invHeaderH(first) {
+  return first ? INV_GEO.titleH + INV_GEO.sellerH + INV_GEO.partiesH + INV_GEO.stripH
+               : INV_GEO.titleH + INV_GEO.contStripH;
+}
+function invTaxBlockH(groupCount) {
+  return INV_GEO.taxHeadH + groupCount * INV_GEO.taxRowH + INV_GEO.taxFootH;
+}
+// Every page reserves the same footer band, last page or not: the final page
+// carries the tax summary, totals, words, bank and signature; earlier pages
+// carry the page subtotals, bank details and a pointer to the final page.
+// Identical reservation means a page break never changes the line count.
+function invFooterH(groupCount) {
+  return invTaxBlockH(groupCount) + INV_GEO.totalsH + INV_GEO.wordsH +
+         INV_GEO.bankH + INV_GEO.pageFootH;
+}
+function invTableAreaH(first, groupCount) {
+  return Math.round((INV_GEO.pageH - invHeaderH(first) - invFooterH(groupCount)) * 100) / 100;
+}
+function invPageCapacity(first, groupCount) {
+  return Math.max(1, Math.floor((invTableAreaH(first, groupCount) - INV_GEO.tableHeadH) / INV_GEO.rowH));
+}
+
+function invPaginate(lines, groupCount) {
+  var units = lines.map(invRowUnits), pages = [], i = 0;
+  while (i < lines.length) {
+    var first = pages.length === 0;
+    var cap = invPageCapacity(first, groupCount);
+    var rest = 0;
+    for (var k = i; k < lines.length; k++) rest += units[k];
+    if (rest <= cap) {
+      pages.push({ from: i, items: lines.slice(i), first: first, isLast: true, used: rest });
+      i = lines.length;
+    } else {
+      var used = 0, j = i;
+      while (j < lines.length && used + units[j] <= cap) { used += units[j]; j++; }
+      if (j === i) { used = units[i]; j = i + 1; }
+      pages.push({ from: i, items: lines.slice(i, j), first: first, isLast: false, used: used });
+      i = j;
+    }
+  }
+  if (!pages.length) pages.push({ from: 0, items: [], first: true, isLast: true, used: 0 });
+  pages.forEach(function (p, idx) {
+    p.number = idx + 1;
+    p.capacity = invPageCapacity(p.first, groupCount);
+    p.tableH = invTableAreaH(p.first, groupCount);
+    p.bodyH = Math.round((p.tableH - INV_GEO.tableHeadH) * 100) / 100;
+    p.filler = Math.round((p.bodyH - p.used * INV_GEO.rowH) * 100) / 100;
+  });
+  return pages;
+}
+
+// ── formatting ─────────────────────────────────────────────────────────────
+function invEsc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function invGroupIN(n) {
+  var neg = n < 0;
+  n = Math.abs(Math.round(n * 100) / 100);
+  var s = n.toFixed(2), parts = s.split('.'), whole = parts[0];
+  var last3 = whole.length > 3 ? whole.slice(-3) : whole;
+  var rest = whole.length > 3 ? whole.slice(0, -3) : '';
+  if (rest) rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',';
+  return (neg ? '-' : '') + rest + last3 + '.' + parts[1];
+}
+function invNum(n) { return invGroupIN(parseFloat(n || 0)); }
+function invCur(n) { return '&#x20B9;' + invGroupIN(parseFloat(n || 0)); }
+function invDMY(v) {
+  var ymd = gasDateToYMD(v);
+  if (!ymd) return '-';
+  var mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var p = ymd.split('-');
+  return p[2] + '-' + mon[parseInt(p[1], 10) - 1] + '-' + p[0];
+}
+function invFY(v) {
+  var ymd = gasDateToYMD(v);
+  var d = ymd ? new Date(ymd) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  var y = d.getFullYear(), start = d.getMonth() >= 3 ? y : y - 1;
+  return start + '-' + String(start + 1).slice(2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+function buildInvoiceHtml(data) {
+  var calc = computeInvoiceLineCalc(data);
+  var lines = calc.lines;
+  var groups = calc.groups;
+  var intra = calc.intra;
+  var pages = invPaginate(lines, groups.length);
+  var totalPages = pages.length;
+  var shipTo = data.shipTo || null;
+  var buyerState = data.buyerState || '';
+  var buyerCode = data.stateCode || '';
+  var amountInWords = 'Rupees ' + numberToWordsGas(Math.round(calc.grandTotal)) + ' Only';
+
+  // Columns, same set and widths as the browser engine.
+  var COLS = [
+    { t: 'S/N', w: 5, a: 'center' },
+    { t: 'Description of goods and services', w: 43, a: 'left' },
+    { t: 'HSN/SAC', w: 8, a: 'center' },
+    { t: 'Unit', w: 6, a: 'center' },
+    { t: 'Qty', w: 8, a: 'right' },
+    { t: 'Rate', w: 11, a: 'right' },
+    { t: 'Taxable value', w: 19, a: 'right' }
+  ];
+
+  function itemRowHtml(l, sn) {
+    var h = invPx(invRowUnits(l) * INV_GEO.rowH);
+    var cells = [
+      { v: sn, a: 'center' },
+      { v: invEsc(l.desc), a: 'left' },
+      { v: invEsc(l.hsn || ''), a: 'center' },
+      { v: invEsc(l.unit || 'Nos'), a: 'center' },
+      { v: invNum(l.qty), a: 'right' },
+      { v: invNum(l.rate), a: 'right' },
+      { v: invNum(l.taxable), a: 'right' }
+    ];
+    return '<tr style="height:' + h + 'px;">' + cells.map(function (c, i) {
+      return '<td class="ig' + (i === cells.length - 1 ? ' last' : '') +
+        '" style="text-align:' + c.a + ';">' + c.v + '</td>';
+    }).join('') + '</tr>';
+  }
+
+  function fillerRowHtml(mm) {
+    if (mm <= 0.05) return '';
+    return '<tr style="height:' + invPx(mm) + 'px;">' + COLS.map(function (c, i) {
+      return '<td class="ig' + (i === COLS.length - 1 ? ' last' : '') + '">&nbsp;</td>';
+    }).join('') + '</tr>';
+  }
+
+  function itemsTableHtml(page) {
+    var rows = '';
+    page.items.forEach(function (l, i) { rows += itemRowHtml(l, page.from + i + 1); });
+    return '<table class="grid" cellpadding="0" cellspacing="0" style="height:' + invPx(page.tableH) + 'px;">' +
+      '<colgroup>' + COLS.map(function (c) { return '<col style="width:' + c.w + '%;">'; }).join('') + '</colgroup>' +
+      '<thead><tr style="height:' + invPx(INV_GEO.tableHeadH) + 'px;">' +
+      COLS.map(function (c, i) {
+        return '<th class="ig' + (i === COLS.length - 1 ? ' last' : '') +
+          '" style="text-align:' + (c.a === 'right' ? 'right' : c.a) + ';">' + invEsc(c.t) + '</th>';
+      }).join('') + '</tr></thead><tbody>' + rows + fillerRowHtml(page.filler) + '</tbody></table>';
+  }
+
+  // ── header blocks ────────────────────────────────────────────────────────
+  function titleHtml() {
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.titleH) + 'px;">' +
+      '<tr><td class="pad ttl">TAX INVOICE</td>' +
+      '<td class="pad copy">ORIGINAL FOR RECIPIENT</td></tr></table>';
+  }
+
+  function sellerHtml() {
+    function id(k, v) {
+      return v ? '<tr><td class="lbl">' + k + '</td><td class="bold rt">' + invEsc(v) + '</td></tr>' : '';
+    }
+    var addr = String(COMPANY.address || '').split(/\r?\n/).map(invEsc).join('<br>');
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.sellerH) + 'px;">' +
+      '<tr>' +
+      (COMPANY.logo ? '<td class="pad" width="52" style="vertical-align:middle;"><img src="' + COMPANY.logo +
+        '" style="max-width:46px;max-height:46px;"></td>' : '') +
+      '<td class="pad" style="vertical-align:top;">' +
+        '<div class="coname">' + invEsc(COMPANY.name) + '</div>' +
+        '<div class="coaddr">' + addr + '</div></td>' +
+      '<td class="pad" width="235" style="vertical-align:top;">' +
+        '<table cellpadding="0" cellspacing="0" class="ids">' +
+        id('GSTIN', COMPANY.gstin) + id('PAN', COMPANY.pan) + id('Phone', COMPANY.phone) +
+        id('Email', COMPANY.email) + id('Web', COMPANY.website) +
+        '</table></td></tr></table>';
+  }
+
+  function partyLinesHtml(name, address, gstin, state, code, phone) {
+    var out = [];
+    String(address || '').split(/\r?\n/).forEach(function (t) { if (t && t.trim()) out.push(t.trim()); });
+    if (gstin) out.push('GSTIN: ' + gstin);
+    if (state) out.push('State: ' + state + (code ? ' (code ' + code + ')' : ''));
+    if (phone) out.push('Phone: ' + phone);
+    return '<div class="pname">' + invEsc(name || '-') + '</div>' +
+      '<div class="plines">' + out.map(invEsc).join('<br>') + '</div>';
+  }
+
+  function partiesHtml() {
+    function metaRow(k, v) {
+      return '<tr style="height:' + invPx(INV_GEO.metaRowH) + 'px;">' +
+        '<td class="mk">' + invEsc(k) + '</td><td class="mv">' + invEsc(v || '-') + '</td></tr>';
+    }
+    var pos = buyerState ? buyerState + (buyerCode ? ' (' + buyerCode + ')' : '') : '';
+    var meta = metaRow('Invoice no.', data.invoiceNo) +
+      metaRow('Invoice date', invDMY(data.date)) +
+      metaRow('Challan no.', data.challanNo) +
+      metaRow('Place of supply', pos) +
+      metaRow('Destination', buyerState);
+    var ship = shipTo
+      ? partyLinesHtml(shipTo.name || data.buyerName, shipTo.address, shipTo.gstin,
+                       shipTo.state || buyerState, shipTo.stateCode || '', '')
+      : partyLinesHtml(data.buyerName, data.buyerAddress, data.buyerGstin, buyerState, buyerCode, data.buyerPhone);
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.partiesH) + 'px;">' +
+      '<tr>' +
+      '<td class="pad brt" width="34%" style="vertical-align:top;"><div class="lbl">BILL TO</div>' +
+        partyLinesHtml(data.buyerName, data.buyerAddress, data.buyerGstin, buyerState, buyerCode, data.buyerPhone) + '</td>' +
+      '<td class="pad brt" width="30%" style="vertical-align:top;"><div class="lbl">SHIP TO</div>' + ship + '</td>' +
+      '<td width="235" style="vertical-align:top;padding:0;">' +
+        '<table cellpadding="0" cellspacing="0" class="metatbl">' + meta + '</table></td>' +
+      '</tr></table>';
+  }
+
+  function stripHtml() {
+    var bits = [
+      intra ? 'Intra-state supply, CGST and SGST applicable' : 'Inter-state supply, IGST applicable',
+      'Currency: INR',
+      'FY ' + invFY(data.date)
+    ];
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.stripH) + 'px;">' +
+      '<tr>' + bits.map(function (b, i) {
+        return '<td class="pad strip" style="text-align:' + (i === 0 ? 'left' : (i === bits.length - 1 ? 'right' : 'center')) + ';">' +
+          invEsc(b) + '</td>';
+      }).join('') + '</tr></table>';
+  }
+
+  function contStripHtml(page) {
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.contStripH) + 'px;">' +
+      '<tr><td class="pad" style="vertical-align:middle;"><span class="bold">' + invEsc(COMPANY.name) + '</span><br>' +
+        'Invoice ' + invEsc(data.invoiceNo) + ' dated ' + invDMY(data.date) + '</td>' +
+      '<td class="pad" style="text-align:right;vertical-align:middle;">' + invEsc(data.buyerName) + '<br>' +
+        'Continued from page ' + (page.number - 1) + '</td></tr></table>';
+  }
+
+  // ── footer blocks ────────────────────────────────────────────────────────
+  function taxSummaryHtml() {
+    var head = intra
+      ? ['HSN/SAC','Taxable value','CGST %','CGST amount','SGST %','SGST amount','Total tax']
+      : ['HSN/SAC','Taxable value','IGST %','IGST amount','Total tax'];
+    var widths = intra ? [22,22,8,16,8,16,8] : [26,28,10,22,14];
+    var rows = groups.map(function (g) {
+      var cells = intra
+        ? [invEsc(g.hsn || '-'), invNum(g.taxable), invNum(g.gstPct / 2), invNum(g.cgst),
+           invNum(g.gstPct / 2), invNum(g.sgst), invNum(g.tax)]
+        : [invEsc(g.hsn || '-'), invNum(g.taxable), invNum(g.gstPct), invNum(g.igst), invNum(g.tax)];
+      return '<tr style="height:' + invPx(INV_GEO.taxRowH) + 'px;">' + cells.map(function (c, i) {
+        return '<td class="tx' + (i === cells.length - 1 ? ' last' : '') +
+          '" style="text-align:' + (i === 0 ? 'left' : (i % 2 === 0 && i < cells.length - 1 ? 'center' : 'right')) + ';">' + c + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    var foot = intra
+      ? ['Total', invNum(calc.taxable), '', invNum(calc.cgst), '', invNum(calc.sgst), invNum(calc.totalTax)]
+      : ['Total', invNum(calc.taxable), '', invNum(calc.igst), invNum(calc.totalTax)];
+    return '<table class="band tax" cellpadding="0" cellspacing="0" style="height:' + invPx(invTaxBlockH(groups.length)) + 'px;">' +
+      '<colgroup>' + widths.map(function (w) { return '<col style="width:' + w + '%;">'; }).join('') + '</colgroup>' +
+      '<thead><tr style="height:' + invPx(INV_GEO.taxHeadH) + 'px;">' +
+      head.map(function (h, i) {
+        return '<th class="tx' + (i === head.length - 1 ? ' last' : '') + '">' + invEsc(h) + '</th>';
+      }).join('') + '</tr></thead><tbody>' + rows + '</tbody>' +
+      '<tfoot><tr style="height:' + invPx(INV_GEO.taxFootH) + 'px;">' +
+      foot.map(function (f, i) {
+        return '<td class="tx tf' + (i === foot.length - 1 ? ' last' : '') +
+          '" style="text-align:' + (i === 0 ? 'left' : 'right') + ';">' + f + '</td>';
+      }).join('') + '</tr></tfoot></table>';
+  }
+
+  function totalsHtml() {
+    function row(k, v, cls) {
+      return '<tr class="' + (cls || '') + '"><td class="sk">' + invEsc(k) + '</td>' +
+        '<td class="sv">' + v + '</td></tr>';
+    }
+    var taxRows = intra
+      ? row('CGST', invCur(calc.cgst)) + row('SGST', invCur(calc.sgst))
+      : row('IGST', invCur(calc.igst));
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.totalsH) + 'px;">' +
+      '<tr><td class="pad brt" style="vertical-align:top;">' +
+        '<div class="lbl">DECLARATION</div><div class="decl">We declare that this invoice shows the actual ' +
+        'price of the goods or services described and that all particulars are true and correct.</div></td>' +
+      '<td width="287" style="padding:0;vertical-align:top;">' +
+        '<table cellpadding="0" cellspacing="0" class="sums">' +
+        row('Taxable value', invCur(calc.taxable)) + taxRows +
+        row('Round off', invCur(calc.roundOff)) +
+        row('Grand total', invCur(calc.grandTotal), 'grand') +
+        '</table></td></tr></table>';
+  }
+
+  function wordsHtml() {
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.wordsH) + 'px;">' +
+      '<tr><td class="pad"><span class="lbl">TOTAL AMOUNT IN WORDS</span><br>' +
+      '<span class="bold words">' + invEsc(amountInWords) + '</span></td></tr></table>';
+  }
+
+  function bankCellHtml() {
+    function row(k, v) {
+      return v ? '<tr><td class="bk">' + invEsc(k) + '</td><td class="bv">' + invEsc(v) + '</td></tr>' : '';
+    }
+    return '<div class="lbl">BANK DETAILS</div><table cellpadding="0" cellspacing="0" class="banktbl">' +
+      row('Account name', COMPANY.acctName) + row('Account no.', COMPANY.acctNo) +
+      row('IFSC', COMPANY.ifsc) + row('Bank', COMPANY.bank) + row('UPI', COMPANY.upi) + '</table>';
+  }
+
+  function termsHtml() {
+    return '<div class="lbl">TERMS</div><div class="terms">Interest is chargeable on overdue amounts. ' +
+      'Goods once sold are not taken back unless agreed in writing.' +
+      (COMPANY.state ? ' Subject to ' + invEsc(COMPANY.state) + ' jurisdiction.' : '') + '</div>';
+  }
+
+  function bankBandHtml() {
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.bankH) + 'px;">' +
+      '<tr><td class="pad brt" style="vertical-align:top;">' + bankCellHtml() + '</td>' +
+      '<td class="pad brt" width="38%" style="vertical-align:top;">' + termsHtml() + '</td>' +
+      '<td class="pad sign" width="220" style="vertical-align:top;">' +
+        '<div>For <span class="bold">' + invEsc(COMPANY.name) + '</span></div>' +
+        (COMPANY.signature ? '<div style="margin-top:4px;"><img src="' + COMPANY.signature +
+          '" style="max-height:34px;max-width:150px;"></div>' : '<div style="height:34px;"></div>') +
+        '<div>Authorised signatory</div></td></tr></table>';
+  }
+
+  // Non-last page footer band. Same height as the final page's band, so the
+  // line capacity of the two pages is identical.
+  function continuationBandHtml(page) {
+    var before = 0, here = 0;
+    for (var i = 0; i < page.from; i++) before += lines[i].taxable;
+    page.items.forEach(function (l) { here += l.taxable; });
+    before = Math.round(before * 100) / 100;
+    here = Math.round(here * 100) / 100;
+    function row(k, v, cls) {
+      return '<tr class="' + (cls || '') + '"><td class="sk">' + invEsc(k) + '</td>' +
+        '<td class="sv">' + v + '</td></tr>';
+    }
+    return '<table class="band" cellpadding="0" cellspacing="0" style="height:' +
+        invPx(invTaxBlockH(groups.length) + INV_GEO.totalsH) + 'px;">' +
+      '<tr><td class="pad brt" style="vertical-align:top;">' +
+        '<div class="lbl">CONTINUATION</div><div class="decl">Lines ' + (page.from + 1) + ' to ' +
+        (page.from + page.items.length) + ' of ' + lines.length + ' appear on this page. The tax summary, ' +
+        'grand total, amount in words and authorised signature appear on page ' + totalPages +
+        ' of ' + totalPages + '.</div></td>' +
+      '<td width="287" style="padding:0;vertical-align:top;">' +
+        '<table cellpadding="0" cellspacing="0" class="sums">' +
+        row('Brought forward', invCur(before)) +
+        row('Taxable value this page', invCur(here)) +
+        row('Carried forward', invCur(Math.round((before + here) * 100) / 100), 'grand') +
+        '</table></td></tr></table>' +
+      '<table class="band" cellpadding="0" cellspacing="0" style="height:' +
+        invPx(INV_GEO.wordsH + INV_GEO.bankH) + 'px;">' +
+      '<tr><td class="pad brt" style="vertical-align:top;">' + bankCellHtml() + '</td>' +
+      '<td class="pad brt" width="38%" style="vertical-align:top;">' + termsHtml() + '</td>' +
+      '<td class="pad sign" width="220" style="vertical-align:middle;">' +
+        '<div class="bold">Continued on page ' + (page.number + 1) + ' of ' + totalPages + '</div>' +
+        '<div style="margin-top:6px;">This page is not the final page of this invoice</div>' +
+      '</td></tr></table>';
+  }
+
+  function pageFootHtml(page) {
+    return '<table class="band nb" cellpadding="0" cellspacing="0" style="height:' + invPx(INV_GEO.pageFootH) + 'px;">' +
+      '<tr><td class="pad pf">' + invEsc(data.invoiceNo) + ' &middot; ' + invEsc(data.buyerName) + '</td>' +
+      '<td class="pad pf" style="text-align:center;">Page ' + page.number + ' of ' + totalPages + '</td>' +
+      '<td class="pad pf" style="text-align:right;">Computer generated tax invoice</td></tr></table>';
+  }
+
+  // ── assemble ─────────────────────────────────────────────────────────────
+  var pagesHtml = '';
+  pages.forEach(function (page, idx) {
+    var head = titleHtml() + (page.first ? sellerHtml() + partiesHtml() + stripHtml() : contStripHtml(page));
+    var foot = page.isLast
+      ? taxSummaryHtml() + totalsHtml() + wordsHtml() + bankBandHtml()
+      : continuationBandHtml(page);
+    pagesHtml += '<div class="pc' + (idx < totalPages - 1 ? ' pc-break' : '') + '">' +
+      '<div class="sheet">' + head + itemsTableHtml(page) + foot + pageFootHtml(page) + '</div></div>';
+  });
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
+'@page{size:A4 portrait;margin:8mm;}' +
+'html,body{margin:0;padding:0;}' +
+'body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#000;line-height:1.2;background:#fff;' +
+  '-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+'.pc{width:' + invPx(INV_GEO.pageW) + 'px;margin:0 auto;}' +
+'.pc-break{page-break-after:always;}' +
+'.sheet{border:2px solid #000;width:100%;}' +
+'table{border-collapse:collapse;width:100%;}' +
+'.band{border-bottom:1px solid #000;}' +
+'.band.nb{border-bottom:none;border-top:1px solid #000;}' +
+'.pad{padding:2px 5px;}' +
+'.brt{border-right:1px solid #000;}' +
+'.ttl{font-size:14px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;}' +
+'.copy{font-size:8px;text-transform:uppercase;text-align:right;letter-spacing:1px;}' +
+'.coname{font-size:15px;font-weight:bold;}' +
+'.coaddr{font-size:9.5px;margin-top:2px;}' +
+'.ids td{font-size:9px;padding:0 0 1px 0;border-bottom:1px dotted #999;}' +
+'.ids .rt{text-align:right;}' +
+'.lbl{font-size:7.5px;text-transform:uppercase;color:#333;letter-spacing:0.5px;}' +
+'.pname{font-size:11px;font-weight:bold;margin:1px 0;}' +
+'.plines{font-size:9.5px;line-height:1.3;}' +
+'.metatbl td{font-size:9px;padding:0 5px;border-bottom:1px solid #bbb;white-space:nowrap;overflow:hidden;}' +
+'.metatbl .mk{color:#333;width:42%;}' +
+'.metatbl .mv{font-weight:bold;}' +
+'.metatbl tr:last-child td{border-bottom:none;}' +
+'.strip{font-size:9.5px;}' +
+'.grid th{font-size:8.5px;font-weight:bold;text-transform:uppercase;border-bottom:1px solid #000;' +
+  'border-right:1px solid #000;padding:0 4px;}' +
+'.grid td{font-size:10px;padding:0 4px;vertical-align:top;border-right:1px solid #000;}' +
+'.grid .last{border-right:none;}' +
+'.grid{border-bottom:1px solid #000;}' +
+'.tax th,.tax td{font-size:8.5px;padding:0 4px;border-right:1px solid #000;border-bottom:1px solid #999;}' +
+'.tax th{font-weight:bold;text-transform:uppercase;border-bottom:1px solid #000;}' +
+'.tax .last{border-right:none;}' +
+'.tax .tf{font-weight:bold;border-top:1px solid #000;border-bottom:none;}' +
+'.decl{font-size:9px;line-height:1.3;margin-top:1px;}' +
+'.sums td{font-size:10px;padding:1px 5px;border-bottom:1px solid #bbb;}' +
+'.sums .sk{color:#222;}' +
+'.sums .sv{text-align:right;width:105px;}' +
+'.sums .grand td{font-size:13px;font-weight:bold;border-top:1px solid #000;border-bottom:none;}' +
+'.words{font-size:11px;}' +
+'.banktbl td{font-size:9.5px;padding:0;}' +
+'.banktbl .bk{color:#333;width:70px;}' +
+'.banktbl .bv{font-weight:bold;}' +
+'.terms{font-size:9px;line-height:1.3;}' +
+'.sign{text-align:center;font-size:9.5px;}' +
+'.pf{font-size:8.5px;}' +
+'.bold{font-weight:bold;}' +
+'</style></head><body>' + pagesHtml + '</body></html>';
+}
+
+// ── Number to Words (GAS-compatible, no arrow functions) ─────────────────────
+
+function numberToWordsGas(price) {
+  const sglDigit  = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine'];
+  const dblDigit  = ['Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tensPlace = ['','Ten','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+
+  if (!price || price === 0) return 'Zero Only';
+  if (price.toString().length > 9) return 'Amount too large';
+
+  const numString   = price.toString().padStart(9, '0');
+  const crores      = parseInt(numString.substring(0, 2), 10);
+  const lakhs       = parseInt(numString.substring(2, 4), 10);
+  const thousands   = parseInt(numString.substring(4, 6), 10);
+  const hundreds    = parseInt(numString.substring(6, 7), 10);
+  const tensAndOnes = parseInt(numString.substring(7, 9), 10);
+
+  var words = '';
+
+  function proc(num, suffix) {
+    if (num <= 0) return;
+    if (num < 10) {
+      words += sglDigit[num] + ' ' + suffix + ' ';
+    } else if (num < 20) {
+      words += dblDigit[num - 10] + ' ' + suffix + ' ';
+    } else {
+      words += tensPlace[Math.floor(num / 10)] + ' ';
+      if (num % 10 > 0) words += sglDigit[num % 10] + ' ';
+      words += suffix + ' ';
+    }
+  }
+
+  proc(crores,    'Crore');
+  proc(lakhs,     'Lakh');
+  proc(thousands, 'Thousand');
+  if (hundreds > 0) words += sglDigit[hundreds] + ' Hundred ';
+  if (tensAndOnes > 0) {
+    if (words !== '') words += 'and ';
+    if (tensAndOnes < 10)       words += sglDigit[tensAndOnes] + ' ';
+    else if (tensAndOnes < 20)  words += dblDigit[tensAndOnes - 10] + ' ';
+    else {
+      words += tensPlace[Math.floor(tensAndOnes / 10)] + ' ';
+      if (tensAndOnes % 10 > 0) words += sglDigit[tensAndOnes % 10] + ' ';
+    }
+  }
+  return words.trim() + ' Only';
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO EMAIL — CHALLAN PDF SENDER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Fires automatically after every successful challan save.
+// Builds a self-contained inline-CSS HTML challan, converts it to PDF
+// via DriveApp temp file method, and sends to fixed SELLER_EMAIL via MailApp.
+//
+// Called by handleSaveChallan() after sheet.appendRow() succeeds.
+// Returns: { sent: true/false, message: string }
+// ─────────────────────────────────────────────────────────────────────────
+
+function sendChallanEmail(data) {
+  const SELLER_EMAIL = 'itransform007@gmail.com';
+
+  // ── Build challan HTML ───────────────────────────────────────────────────
+  const htmlContent = buildChallanHtml(data);
+
+  const safeChallanNo = (data.challanNo || 'Challan').replace(/\//g, '-');
+  const safeBuyerName = (data.buyerName || 'Consignee').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const pdfFileName   = safeBuyerName + ' - ' + safeChallanNo + '.pdf';
+
+  // ── Convert HTML → PDF via DriveApp temp file ───────────────────────────
+  var tempFile = null;
+  var pdfBlob;
+  try {
+    tempFile = DriveApp.createFile(
+      Utilities.newBlob(htmlContent, 'text/html', 'temp_challan.html')
+    );
+    pdfBlob = tempFile.getAs('application/pdf');
+    pdfBlob.setName(pdfFileName);
+  } finally {
+    if (tempFile) {
+      try { tempFile.setTrashed(true); } catch(e) { Logger.log('Temp file cleanup: ' + e); }
+    }
+  }
+
+  // ── Format email subject & body ─────────────────────────────────────────
+  const subject = 'New Challan Saved: ' + (data.challanNo || '') + ' | ' + (data.buyerName || 'Unknown Consignee');
+
+  const rawDate = gasDateToYMD(data.date);
+  const fmtDate = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+
+  const emailBody =
+    'A new delivery challan has been saved to Google Sheets.\n\n' +
+    'Challan Details:\n' +
+    '  Challan No.   : ' + (data.challanNo || '-') + '\n' +
+    '  Date          : ' + fmtDate + '\n' +
+    '  Consignee     : ' + (data.buyerName || '-') + '\n' +
+    '  Buyer GSTIN   : ' + (data.buyerGstin || 'Unregistered') + '\n' +
+    (data.refInvoiceNo ? '  Ref Invoice   : ' + data.refInvoiceNo + '\n' : '') +
+    '\nPlease find the delivery challan PDF attached.\n\n' +
+    '-- Enterprises Challan System';
+
+  // ── Send email to seller ────────────────────────────────────────────────
+  MailApp.sendEmail(SELLER_EMAIL, subject, emailBody, {
+    name:        'Enterprises — Challan System',
+    attachments: [pdfBlob]
+  });
+
+  Logger.log('Challan email sent to ' + SELLER_EMAIL + ' for ' + (data.challanNo || ''));
+  return { sent: true, message: 'Email sent to ' + SELLER_EMAIL };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BUILD CHALLAN HTML  (self-contained inline-CSS — matches challan print engine)
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildChallanHtml(data) {
+  const items = data.items || [];
+
+  const rawDate = gasDateToYMD(data.date);
+  const fmtD    = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+  let totalQty  = 0;
+  items.forEach(function(i){ totalQty += parseFloat(i.qty) || 0; });
+
+  // ── Item rows ────────────────────────────────────────────────────────────
+  let itemRowsHtml = '';
+  items.forEach(function(item, idx) {
+    itemRowsHtml += `<tr style="height:24px;">
+      <td style="border-right:1px solid #000;text-align:center;">${idx+1}</td>
+      <td style="border-right:1px solid #000;padding:2px 6px;"><strong>${item.desc||''}</strong></td>
+      <td style="border-right:1px solid #000;text-align:center;font-family:monospace;">${item.hsn||''}</td>
+      <td style="border-right:1px solid #000;text-align:center;font-family:monospace;font-weight:600;">${item.qty}</td>
+      <td style="border-right:1px solid #000;text-align:center;">${item.unit||'Nos'}</td>
+      <td style="text-align:left;padding-left:6px;font-size:10px;color:#444;">${item.remarks||''}</td>
+    </tr>`;
+  });
+
+  // ── Blank filler rows ────────────────────────────────────────────────────
+  const blankCount = Math.max(0, 23 - items.length);
+  let blankRowsHtml = '';
+  for (var i = 0; i < blankCount; i++) {
+    blankRowsHtml += `<tr style="height:28px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>`;
+  }
+
+  // ── Assemble full HTML — identical markup/CSS to the frontend Reprint engine ─
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+@page{size:A4 portrait;margin:0;}
+html,body{margin:0;padding:0;width:210mm;height:297mm;overflow:hidden;}
+body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}
+.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}
+.main-box td{vertical-align:top;padding:4px;}
+.inner-grid{width:100%;border-collapse:collapse;height:100%;}
+.inner-grid td{vertical-align:top;padding:3px 5px;}
+.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}
+.items-grid{width:100%;border-collapse:collapse;height:100%;}
+.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}
+.items-grid td{padding:3px 5px;font-size:11px;border-right:1px solid #000;}
+.items-grid th:last-child,.items-grid td:last-child{border-right:none;}
+.bold{font-weight:bold;}
+</style></head><body>
+<div class="pc">
+<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">DELIVERY CHALLAN</div>
+<table class="main-box" cellpadding="0" cellspacing="0">
+
+<!-- SELLER ROW -->
+<tr class="b-bottom" style="height:70px;">
+  <td width="50%" class="b-right">
+    <div class="bold" style="font-size:12px;">${COMPANY.name}</div>
+    <div style="margin-top:2px;">${COMPANY.address}</div>
+    <div style="margin-top:2px;"><span class="bold">Ph:</span> ${COMPANY.phone} &nbsp;|&nbsp; <span class="bold">Email:</span> ${COMPANY.email}</div>
+    <div><span class="bold">Web:</span> ${COMPANY.website}</div>
+    <div style="margin-top:2px;">GSTIN/UIN: <strong>${COMPANY.gstin}</strong></div>
+    <div>State: <strong>${COMPANY.state}</strong>, Code: <strong>${COMPANY.stateCode}</strong></div>
+  </td>
+  <td width="50%" style="padding:0;">
+    <table class="inner-grid" cellpadding="0" cellspacing="0">
+      <tr class="b-bottom"><td class="b-right" width="50%">Challan No.<br><strong>${data.challanNo||'-'}</strong></td><td>Dated<br><strong>${fmtD}</strong></td></tr>
+      <tr class="b-bottom"><td class="b-right">Ref. Invoice No.<br><strong>${data.refInvoiceNo||'-'}</strong></td><td>Vehicle / Transport<br><strong>${data.transport||'-'}</strong></td></tr>
+      <tr class="b-bottom"><td class="b-right">Supplier's Ref.<br><strong>-</strong></td><td>Destination<br><strong>${data.buyerState||'-'}</strong></td></tr>
+    </table>
+  </td>
+</tr>
+
+<!-- CONSIGNEE ROW -->
+<tr class="b-bottom" style="height:80px;">
+  <td colspan="2">
+    <div style="font-size:9px;text-transform:uppercase;color:#444;">Consignee (Ship To)</div>
+    <div class="bold" style="margin-top:2px;font-size:12px;">${data.buyerName||'-'}</div>
+    <div style="margin-top:2px;white-space:pre-line;">${data.buyerAddress||'-'}</div>
+    <div style="margin-top:2px;">GSTIN/UIN: <strong>${data.buyerGstin||'Unregistered'}</strong>&nbsp;&nbsp; State: <strong>${data.buyerState||'Maharashtra'}</strong></div>
+    <div style="margin-top:2px;font-size:10px;">${data.buyerPhone?`<span class="bold">Ph:</span> ${data.buyerPhone}`:''} ${data.buyerPhone&&data.buyerEmail?' &nbsp;|&nbsp; ':''} ${data.buyerEmail?`<span class="bold">Email:</span> ${data.buyerEmail}`:''}</div>
+  </td>
+</tr>
+
+<!-- ITEMS TABLE — No Rate/GST/Amount columns -->
+<tr style="height:100%;"><td colspan="2" style="padding:0;height:100%;">
+  <table class="items-grid" style="height:100%;">
+    <thead><tr>
+      <th width="6%" style="text-align:center;">Sl</th>
+      <th width="42%" style="text-align:left;">Description of Goods</th>
+      <th width="13%" style="text-align:center;">HSN/SAC</th>
+      <th width="12%" style="text-align:center;">Quantity</th>
+      <th width="10%" style="text-align:center;">Unit</th>
+      <th width="17%" style="text-align:left;border-right:none;">Remarks</th>
+    </tr></thead>
+    <tbody>
+      ${itemRowsHtml}
+      ${blankRowsHtml}
+      <tr style="height:100%;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>
+    </tbody>
+    <tfoot><tr style="font-weight:bold;height:24px;">
+      <td style="border-top:1px solid #000;border-right:1px solid #000;"></td>
+      <td style="border-top:1px solid #000;border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>
+      <td style="border-top:1px solid #000;border-right:1px solid #000;"></td>
+      <td style="border-top:1px solid #000;border-right:1px solid #000;text-align:center;font-size:12px;">${totalQty}</td>
+      <td style="border-top:1px solid #000;border-right:1px solid #000;"></td>
+      <td style="border-top:1px solid #000;"></td>
+    </tr></tfoot>
+  </table>
+</td></tr>
+
+<!-- NOTES ROW -->
+${data.notes?`<tr class="b-top b-bottom"><td colspan="2" style="padding:6px;font-size:10px;"><span class="bold">Notes:</span> ${data.notes}</td></tr>`:''}
+
+<!-- FOOTER — Declaration + Signature -->
+<tr><td colspan="2" style="padding:0;border-top:1px solid #000;">
+  <table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">
+    <tr style="vertical-align:bottom;">
+      <td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">
+        <div class="bold" style="font-size:9px;">Declaration:</div>
+        <div style="font-size:9px;color:#222;text-align:justify;">We declare that this challan shows the actual quantities of the goods described and that all particulars are true and correct.</div>
+      </td>
+      <td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">
+        <div style="font-size:10px;">For <strong>${COMPANY.name}</strong></div>
+        <div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>
+      </td>
+    </tr>
+  </table>
+</td></tr>
+
+</table>
+<div style="text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;">SUBJECT TO MAHARASHTRA JURISDICTION</div>
+<div style="text-align:center;font-size:9px;color:#555;margin-top:2px;">This is a Computer Generated Delivery Challan</div>
+</div></body></html>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REPORT EMAIL HANDLERS — triggered from reports.html Send Email button
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// handleEmailInvoiceReport(body): looks up invoice by invoiceNo from sheet,
+//   reconstructs the full data object, then calls sendInvoiceEmail().
+//
+// handleEmailChallanReport(body): looks up challan by challanNo from sheet,
+//   reconstructs the full data object, then calls sendChallanEmail().
+// ─────────────────────────────────────────────────────────────────────────
+
+function handleEmailInvoiceReport(body) {
+  var invoiceNo = (body.invoiceNo || '').toString().trim();
+  if (!invoiceNo) return jsonOut({ success: false, message: 'Invoice No. is required' });
+
+  var sheet   = getSheet(SHEET_INVOICES);
+  var allData = sheet.getDataRange().getValues();
+  var headers = allData[0];
+
+  // Find the row matching the invoice number
+  var row = null;
+  for (var i = 1; i < allData.length; i++) {
+    if ((allData[i][0] || '').toString().trim().toLowerCase() === invoiceNo.toLowerCase()) {
+      row = allData[i];
+      break;
+    }
+  }
+  if (!row) return jsonOut({ success: false, message: 'Invoice not found: ' + invoiceNo });
+
+  // Map row to column headers
+  var inv = {};
+  headers.forEach(function(h, j) { inv[h] = row[j]; });
+
+  // Reconstruct emailPayload from sheet columns
+  var itemsJson = inv['Items (JSON)'] || inv['items'] || '[]';
+  var items;
+  try { items = JSON.parse(itemsJson); } catch(e) { items = []; }
+
+  var emailPayload = {
+    invoiceNo:    inv['Invoice No']    || inv['Invoice No.'] || invoiceNo,
+    date:         inv['Date']          || '',
+    challanNo:    inv['Challan No']    || inv['Challan No.'] || '',
+    buyerName:    inv['Buyer Name']    || '',
+    buyerPhone:   inv['Buyer Phone']   || '',
+    buyerEmail:   inv['Buyer Email']   || '',
+    buyerAddress: inv['Buyer Address'] || '',
+    buyerGstin:   inv['Buyer GSTIN']   || '',
+    subTotal:     inv['Sub Total']     || 0,
+    cgstRate:     inv['CGST Rate']     || 0,
+    sgstRate:     inv['SGST Rate']     || 0,
+    igstRate:     inv['IGST Rate']     || 0,
+    cgstAmount:   inv['CGST Amount']   || 0,
+    sgstAmount:   inv['SGST Amount']   || 0,
+    igstAmount:   inv['IGST Amount']   || 0,
+    taxAmount:    inv['Tax Amount']    || 0,
+    grandTotal:   inv['Grand Total']   || 0,
+    items:        items
+  };
+
+  try {
+    var result = sendInvoiceEmail(emailPayload);
+    return jsonOut({ success: result.sent, message: result.message });
+  } catch(e) {
+    return jsonOut({ success: false, message: e.toString() });
+  }
+}
+
+function handleEmailChallanReport(body) {
+  var challanNo = (body.challanNo || '').toString().trim();
+  if (!challanNo) return jsonOut({ success: false, message: 'Challan No. is required' });
+
+  var sheet   = getSheet(SHEET_CHALLANS);
+  var allData = sheet.getDataRange().getValues();
+  var headers = allData[0];
+
+  // Find the row matching the challan number
+  var row = null;
+  for (var i = 1; i < allData.length; i++) {
+    if ((allData[i][0] || '').toString().trim().toLowerCase() === challanNo.toLowerCase()) {
+      row = allData[i];
+      break;
+    }
+  }
+  if (!row) return jsonOut({ success: false, message: 'Challan not found: ' + challanNo });
+
+  // Map row to column headers
+  var ch = {};
+  headers.forEach(function(h, j) { ch[h] = row[j]; });
+
+  // Reconstruct emailPayload from sheet columns
+  var itemsJson = ch['Items (JSON)'] || ch['items'] || '[]';
+  var items;
+  try { items = JSON.parse(itemsJson); } catch(e) { items = []; }
+
+  var emailPayload = {
+    challanNo:    ch['Challan No']    || ch['Challan No.'] || challanNo,
+    date:         ch['Date']          || '',
+    refInvoiceNo: ch['Ref Invoice No'] || ch['Ref Invoice No.'] || '',
+    transport:    ch['Transport']     || '',
+    notes:        ch['Notes']         || '',
+    buyerName:    ch['Buyer Name']    || '',
+    buyerPhone:   ch['Buyer Phone']   || '',
+    buyerEmail:   ch['Buyer Email']   || '',
+    buyerAddress: ch['Buyer Address'] || '',
+    buyerGstin:   ch['Buyer GSTIN']   || '',
+    items:        items
+  };
+
+  try {
+    var result = sendChallanEmail(emailPayload);
+    return jsonOut({ success: result.sent, message: result.message });
+  } catch(e) {
+    return jsonOut({ success: false, message: e.toString() });
+  }
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// QUOTATION HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Sheet: "Quotations"
+// Columns: Quotation No | Date | Valid Until | Ref No | Buyer Name | Buyer Phone |
+//          Buyer Email | Buyer Address | Buyer GSTIN | Buyer State |
+//          Sub Total | Tax Total | Grand Total | Notes | Items (JSON) | Saved By | Timestamp
+//
+// Auto-increment format: QT/YY-YY/NNN  e.g. QT/26-27/001
+// ─────────────────────────────────────────────────────────────────────────
+
+function handleGetNextQuotationNo() {
+  try {
+    const sheet = getSheet(SHEET_QUOTATIONS);
+    const data  = sheet.getDataRange().getValues();
+
+    const existingNos = data.slice(1)
+      .map(r => (r[0] || '').toString().trim())
+      .filter(v => v !== '');
+
+    const now     = new Date();
+    const yr      = now.getFullYear();
+    const mo      = now.getMonth() + 1;
+    const fyStart = mo >= 4 ? yr : yr - 1;
+    const fyEnd   = fyStart + 1;
+    const fySuffix = String(fyStart).slice(-2) + '-' + String(fyEnd).slice(-2);
+    const prefix   = 'QT/' + fySuffix + '/';
+
+    let maxSeq = 0;
+    existingNos.forEach(function(no) {
+      if (no.toUpperCase().startsWith(prefix.toUpperCase())) {
+        const parts = no.split('/');
+        const seq   = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const nextSeq  = maxSeq + 1;
+    const quotNo   = prefix + String(nextSeq).padStart(3, '0');
+    return jsonOut({ success: true, quotNo: quotNo });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+function handleGetQuotationsData() {
+  const sheet   = getSheet(SHEET_QUOTATIONS);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const quotations = data.slice(1).map(function(row) {
+    var q = {};
+    headers.forEach(function(h, j) { q[h] = row[j]; });
+    q['Quotation No'] = q['Quotation No'] || row[0] || '';
+    return q;
+  });
+  return jsonOut({ quotations: quotations });
+}
+
+function handleGetQuotationByNo(quotNo) {
+  const sheet   = getSheet(SHEET_QUOTATIONS);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  for (var i = 1; i < data.length; i++) {
+    if ((data[i][0] || '').toString().trim().toLowerCase() === quotNo.toLowerCase()) {
+      var q = {};
+      headers.forEach(function(h, j) { q[h] = data[i][j]; });
+      q['Quotation No'] = q['Quotation No'] || data[i][0] || '';
+      return jsonOut({ quotation: q });
+    }
+  }
+  return jsonOut({ quotation: null });
+}
+
+function handleSaveQuotation(body, username) {
+  const sheet   = getSheet(SHEET_QUOTATIONS);
+  const allData = sheet.getDataRange().getValues();
+  const quotNo  = (body.quotNo || '').toString().trim();
+
+  if (!quotNo) return jsonOut({ success: false, message: 'Quotation No. is required' });
+
+  const exists = allData.slice(1).some(function(r) {
+    return (r[0] || '').toString().trim().toLowerCase() === quotNo.toLowerCase();
+  });
+  if (exists) return jsonOut({ success: false, message: 'Duplicate quotation number — ' + quotNo + ' already exists' });
+
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  sheet.appendRow([
+    quotNo,
+    body.date        || '',
+    body.validUntil  || '',
+    body.refNo       || '',
+    body.buyerName   || '',
+    body.buyerPhone  || '',
+    body.buyerEmail  || '',
+    body.buyerAddress || '',
+    body.buyerGstin  || '',
+    body.buyerState  || '',
+    parseFloat(body.subTotal   || 0),
+    parseFloat(body.taxTotal   || 0),
+    parseFloat(body.grandTotal || 0),
+    body.notes       || '',
+    body.itemsJson   || '[]',
+    username,
+    now
+  ]);
+
+  // ── AUTO EMAIL ────────────────────────────────────────────────────────────
+  var emailSent    = false;
+  var emailMessage = '';
+  try {
+    var emailPayload = {
+      quotNo:      quotNo,
+      date:        body.date        || '',
+      validUntil:  body.validUntil  || '',
+      refNo:       body.refNo       || '',
+      buyerName:   body.buyerName   || '',
+      buyerPhone:  body.buyerPhone  || '',
+      buyerEmail:  body.buyerEmail  || '',
+      buyerAddress: body.buyerAddress || '',
+      buyerGstin:  body.buyerGstin  || '',
+      buyerState:  body.buyerState  || '',
+      subTotal:    parseFloat(body.subTotal   || 0),
+      taxTotal:    parseFloat(body.taxTotal   || 0),
+      grandTotal:  parseFloat(body.grandTotal || 0),
+      notes:       body.notes       || '',
+      items:       JSON.parse(body.itemsJson || '[]')
+    };
+    var emailResult = sendQuotationEmail(emailPayload);
+    emailSent    = emailResult.sent;
+    emailMessage = emailResult.message;
+  } catch (emailErr) {
+    emailMessage = emailErr.toString();
+    Logger.log('Quotation email error: ' + emailMessage);
+  }
+
+  return jsonOut({ success: true, emailSent: emailSent, emailMessage: emailMessage });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO EMAIL — QUOTATION PDF SENDER
+// ═══════════════════════════════════════════════════════════════════════════
+
+function sendQuotationEmail(data) {
+  const SELLER_EMAIL = 'itransform007@gmail.com';
+
+  const htmlContent = buildQuotationHtmlGas(data);
+
+  const safeQuotNo    = (data.quotNo    || 'Quotation').replace(/\//g, '-');
+  const safeBuyerName = (data.buyerName || 'Customer').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const pdfFileName   = safeBuyerName + ' - ' + safeQuotNo + '.pdf';
+
+  var tempFile = null;
+  var pdfBlob;
+  try {
+    tempFile = DriveApp.createFile(
+      Utilities.newBlob(htmlContent, 'text/html', 'temp_quotation.html')
+    );
+    pdfBlob = tempFile.getAs('application/pdf');
+    pdfBlob.setName(pdfFileName);
+  } finally {
+    if (tempFile) {
+      try { tempFile.setTrashed(true); } catch(e) { Logger.log('Temp file cleanup: ' + e); }
+    }
+  }
+
+  const rawDate = gasDateToYMD(data.date);
+  const fmtDate = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+  const subject = 'New Quotation Saved: ' + (data.quotNo || '') + ' | ' + (data.buyerName || 'Unknown Customer');
+
+  const emailBody =
+    'A new quotation has been saved to Google Sheets.\n\n' +
+    'Quotation Details:\n' +
+    '  Quotation No. : ' + (data.quotNo    || '-') + '\n' +
+    '  Date          : ' + fmtDate + '\n' +
+    '  Customer      : ' + (data.buyerName || '-') + '\n' +
+    '  Grand Total   : Rs.' + parseFloat(data.grandTotal || 0).toFixed(2) + '\n' +
+    (data.validUntil ? '  Valid Until   : ' + data.validUntil + '\n' : '') +
+    '\nPlease find the quotation PDF attached.\n\n' +
+    '-- Enterprises Quotation System';
+
+  MailApp.sendEmail(SELLER_EMAIL, subject, emailBody, {
+    name:        'Enterprises — Quotation System',
+    attachments: [pdfBlob]
+  });
+
+  Logger.log('Quotation email sent to ' + SELLER_EMAIL + ' for ' + (data.quotNo || ''));
+  return { sent: true, message: 'Email sent to ' + SELLER_EMAIL };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BUILD QUOTATION HTML (GAS-side, inline-CSS, A4 portrait)
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildQuotationHtmlGas(data) {
+  var items     = data.items || [];
+  var subTotal  = parseFloat(data.subTotal  || 0);
+  var taxTotal  = parseFloat(data.taxTotal  || 0);
+  var grandTotal = parseFloat(data.grandTotal || 0);
+
+  var rawDate  = gasDateToYMD(data.date);
+  var fmtDate  = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+  var rawValid = gasDateToYMD(data.validUntil);
+  var fmtValid = rawValid ? rawValid.split('-').reverse().join('-') : '-';
+
+  // Item rows
+  var itemRowsHtml = '';
+  items.forEach(function(item, idx) {
+    var amt  = parseFloat(item.amount || 0).toFixed(2);
+    var rate = parseFloat(item.rate   || 0).toFixed(2);
+    itemRowsHtml +=
+      '<tr style="height:22px;">' +
+        '<td style="border-right:1px solid #000;text-align:center;">' + (idx + 1) + '</td>' +
+        '<td style="border-right:1px solid #000;padding:2px 5px;"><strong>' + (item.desc || '') + '</strong></td>' +
+        '<td style="border-right:1px solid #000;text-align:center;font-family:monospace;">' + (item.hsn || '') + '</td>' +
+        '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;"><strong>' + (item.qty || '') + '</strong></td>' +
+        '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;">' + rate + '</td>' +
+        '<td style="border-right:1px solid #000;text-align:center;">' + (item.unit || 'Nos') + '</td>' +
+        '<td style="border-right:1px solid #000;text-align:center;">' + (item.gstPct || 0) + '%</td>' +
+        '<td style="text-align:right;padding-right:4px;font-family:monospace;"><strong>' + amt + '</strong></td>' +
+      '</tr>';
+  });
+
+  // Tax summary rows grouped by GST %
+  var taxMap = {};
+  items.forEach(function(i) {
+    var p = parseFloat(i.gstPct) || 0;
+    if (p > 0) { var t = (i.amount || 0) * p / 100; taxMap[p] = (taxMap[p] || 0) + t; }
+  });
+  var taxRowsHtml = '';
+  Object.keys(taxMap).forEach(function(pct) {
+    taxRowsHtml +=
+      '<tr style="height:20px;font-size:10px;color:#444;">' +
+        '<td style="border-right:1px solid #000;"></td>' +
+        '<td colspan="5" style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">GST @ ' + pct + '%</td>' +
+        '<td style="border-right:1px solid #000;"></td>' +
+        '<td style="text-align:right;padding-right:4px;font-family:monospace;">' + parseFloat(taxMap[pct]).toFixed(2) + '</td>' +
+      '</tr>';
+  });
+
+  // Blank rows
+  var blankCount = Math.max(0, 23 - items.length - Object.keys(taxMap).length);
+  var blankRows  = '';
+  for (var i = 0; i < blankCount; i++) {
+    blankRows += '<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>';
+  }
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+  '<style>' +
+    '@page{size:A4 portrait;margin:0;}' +
+    'html,body{margin:0;padding:0;width:210mm;height:297mm;overflow:hidden;}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+    '.pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}' +
+    '.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}' +
+    '.main-box td{vertical-align:top;padding:4px;}' +
+    '.inner-grid{width:100%;border-collapse:collapse;height:100%;}' +
+    '.inner-grid td{vertical-align:top;padding:3px 5px;}' +
+    '.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}' +
+    '.items-grid{width:100%;border-collapse:collapse;}' +
+    '.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}' +
+    '.items-grid td{padding:3px 5px;font-size:11px;border-right:1px solid #000;}' +
+    '.items-grid th:last-child,.items-grid td:last-child{border-right:none;}' +
+    '.tr{text-align:right;}.tc{text-align:center;}.bold{font-weight:bold;}' +
+  '</style></head><body>' +
+  '<div class="pc">' +
+    '<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">QUOTATION</div>' +
+    '<table class="main-box" cellpadding="0" cellspacing="0">' +
+      '<tr class="b-bottom" style="height:75px;">' +
+        '<td width="50%" class="b-right">' +
+          '<div class="bold" style="font-size:12px;">' + COMPANY.name + '</div>' +
+          '<div style="margin-top:3px;">' + COMPANY.address + '</div>' +
+          '<div style="margin-top:3px;"><span class="bold">Ph:</span> ' + COMPANY.phone + ' &nbsp;|&nbsp; <span class="bold">Email:</span> ' + COMPANY.email + '</div>' +
+          '<div><span class="bold">Web:</span> ' + COMPANY.website + '</div>' +
+          '<div style="margin-top:3px;">GSTIN/UIN: <strong>' + COMPANY.gstin + '</strong></div>' +
+          '<div>State Name: <strong>' + COMPANY.state + '</strong>, Code: <strong>' + COMPANY.stateCode + '</strong></div>' +
+        '</td>' +
+        '<td width="50%" style="padding:0;">' +
+          '<table class="inner-grid" cellpadding="0" cellspacing="0">' +
+            '<tr class="b-bottom"><td class="b-right" width="50%">Quotation No.<br><strong>' + (data.quotNo || '-') + '</strong></td><td>Dated<br><strong>' + fmtDate + '</strong></td></tr>' +
+            '<tr class="b-bottom"><td class="b-right">Valid Until<br><strong>' + fmtValid + '</strong></td><td>Ref. No.<br><strong>' + (data.refNo || '-') + '</strong></td></tr>' +
+            '<tr><td class="b-right">Terms<br><strong>As per quotation</strong></td><td>Destination<br><strong>' + (data.buyerState || '-') + '</strong></td></tr>' +
+          '</table>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="b-bottom" style="height:80px;">' +
+        '<td colspan="2">' +
+          '<div style="font-size:9px;text-transform:uppercase;color:#444;">Bill To / Customer</div>' +
+          '<div class="bold" style="margin-top:2px;font-size:12px;">' + (data.buyerName || '-') + '</div>' +
+          '<div style="margin-top:2px;white-space:pre-line;">' + (data.buyerAddress || '-') + '</div>' +
+          '<div style="margin-top:3px;">GSTIN/UIN: <strong>' + (data.buyerGstin || 'Unregistered') + '</strong>&nbsp;&nbsp; State: <strong>' + (data.buyerState || 'Maharashtra') + '</strong></div>' +
+        '</td>' +
+      '</tr>' +
+      '<tr><td colspan="2" style="padding:0;">' +
+        '<table class="items-grid">' +
+          '<thead><tr>' +
+            '<th width="5%" class="tc">Sl</th>' +
+            '<th width="38%" style="text-align:left;">Description</th>' +
+            '<th width="10%" class="tc">HSN/SAC</th>' +
+            '<th width="8%" class="tr">Qty</th>' +
+            '<th width="10%" class="tr">Rate</th>' +
+            '<th width="7%" class="tc">Unit</th>' +
+            '<th width="7%" class="tc">GST%</th>' +
+            '<th width="15%" class="tr" style="border-right:none;">Amount</th>' +
+          '</tr></thead>' +
+          '<tbody>' + itemRowsHtml + taxRowsHtml + blankRows + '</tbody>' +
+          '<tfoot>' +
+            '<tr style="border-top:1px solid #000;font-weight:bold;height:24px;">' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;">Tax: &#x20B9;' + taxTotal.toFixed(2) + '</td>' +
+              '<td style="text-align:right;padding-right:4px;font-size:12px;">&#x20B9;' + grandTotal.toFixed(2) + '</td>' +
+            '</tr>' +
+          '</tfoot>' +
+        '</table>' +
+      '</td></tr>' +
+      '<tr class="b-top">' +
+        '<td colspan="2" style="padding:6px;">' +
+          (data.notes ? '<div style="font-size:10px;"><span class="bold">Terms &amp; Notes:</span> ' + data.notes + '</div>' : '') +
+        '</td>' +
+      '</tr>' +
+      '<tr><td colspan="2" style="padding:0;">' +
+        '<table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">' +
+          '<tr>' +
+            '<td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">' +
+              '<div class="bold">Company\'s Bank Details:</div>' +
+              '<div>Bank Name: <strong>' + COMPANY.bank + '</strong></div>' +
+              '<div>A/c No: <strong>' + COMPANY.acctNo + '</strong></div>' +
+              '<div>Branch &amp; IFSC: <strong>' + COMPANY.ifsc + '</strong></div>' +
+              '<div>UPI ID: <strong>' + COMPANY.upi + '</strong></div>' +
+            '</td>' +
+            '<td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">' +
+              '<div style="font-size:10px;">For <strong>' + COMPANY.name + '</strong></div>' +
+              '<div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:50px;">Authorised Signatory</div>' +
+            '</td>' +
+          '</tr>' +
+        '</table>' +
+      '</td></tr>' +
+    '</table>' +
+    '<div style="text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;">SUBJECT TO MAHARASHTRA JURISDICTION</div>' +
+    '<div style="text-align:center;font-size:9px;color:#555;margin-top:2px;">This is a Computer Generated Quotation</div>' +
+  '</div></body></html>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREDIT / DEBIT NOTE HANDLERS (mirrors Invoice logic + Invoice print format)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function handleGetNextCreditDebitNoteNo(noteType) {
+  try {
+    const type = (noteType || 'CREDIT').toString().toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT';
+    const sheet = getSheet(SHEET_CREDIT_DEBIT_NOTES);
+    const data  = sheet.getDataRange().getValues();
+
+    const existingNos = data.slice(1)
+      .filter(r => (r[0] || '').toString().trim().toUpperCase() === type)
+      .map(r => (r[1] || '').toString().trim())
+      .filter(v => v !== '');
+
+    const now     = new Date();
+    const yr      = now.getFullYear();
+    const mo      = now.getMonth() + 1;
+    const fyStart = mo >= 4 ? yr : yr - 1;
+    const fyEnd   = fyStart + 1;
+    const fySuffix = String(fyStart).slice(-2) + '-' + String(fyEnd).slice(-2);
+    const prefix   = (type === 'DEBIT' ? 'DN/' : 'CN/') + fySuffix + '/';
+
+    let maxSeq = 0;
+    existingNos.forEach(function(no) {
+      if (no.toUpperCase().startsWith(prefix.toUpperCase())) {
+        const parts = no.split('/');
+        const seq   = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const nextSeq = maxSeq + 1;
+    const noteNo  = prefix + String(nextSeq).padStart(3, '0');
+    return jsonOut({ success: true, noteNo: noteNo });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+function handleGetCreditDebitNotesData() {
+  const sheet   = getSheet(SHEET_CREDIT_DEBIT_NOTES);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const notes = data.slice(1).map(function(row) {
+    var n = {};
+    headers.forEach(function(h, j) { n[h] = row[j]; });
+    n['Note Type'] = n['Note Type'] || row[0] || '';
+    n['Note No']   = n['Note No']   || row[1] || '';
+    return n;
+  });
+  return jsonOut({ notes: notes });
+}
+
+function handleGetCreditDebitNoteByNo(noteNo) {
+  const sheet   = getSheet(SHEET_CREDIT_DEBIT_NOTES);
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  for (var i = 1; i < data.length; i++) {
+    if ((data[i][1] || '').toString().trim().toLowerCase() === noteNo.toLowerCase()) {
+      var n = {};
+      headers.forEach(function(h, j) { n[h] = data[i][j]; });
+      n['Note Type'] = n['Note Type'] || data[i][0] || '';
+      n['Note No']   = n['Note No']   || data[i][1] || '';
+      return jsonOut({ note: n });
+    }
+  }
+  return jsonOut({ note: null });
+}
+
+function handleSaveCreditDebitNote(body, username) {
+  const data    = body.data || {};
+  const sheet   = getSheet(SHEET_CREDIT_DEBIT_NOTES);
+  const allData = sheet.getDataRange().getValues();
+  const noteNo  = (data.noteNo || '').toString().trim();
+  const noteType = (data.noteType || 'CREDIT').toString().toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT';
+
+  if (!noteNo) return jsonOut({ success: false, message: 'Note No. is required' });
+
+  const exists = allData.slice(1).some(function(r) {
+    return (r[1] || '').toString().trim().toLowerCase() === noteNo.toLowerCase();
+  });
+  if (exists) return jsonOut({ success: false, message: 'Duplicate note number — ' + noteNo + ' already exists' });
+
+  const now       = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const itemsJson = JSON.stringify(data.items || []);
+
+  sheet.appendRow([
+    noteType,
+    noteNo,
+    data.date               || '',
+    data.againstInvoiceNo   || '',
+    data.againstInvoiceDate || '',
+    data.reason             || '',
+    data.buyerName          || '',
+    data.buyerPhone         || '',
+    data.buyerEmail         || '',
+    data.buyerAddress       || '',
+    data.buyerGstin         || '',
+    data.buyerState         || '',
+    data.stateCode          || '',
+    data.subTotal           || 0,
+    data.cgstRate           || 0,
+    data.cgstAmount         || 0,
+    data.sgstRate           || 0,
+    data.sgstAmount         || 0,
+    data.igstRate           || 0,
+    data.igstAmount         || 0,
+    data.taxAmount          || 0,
+    data.grandTotal         || 0,
+    itemsJson,
+    username,
+    now
+  ]);
+
+  // ── AUTO EMAIL ────────────────────────────────────────────────────────────
+  var emailSent    = false;
+  var emailMessage = '';
+  try {
+    var emailPayload = {
+      noteType:            noteType,
+      noteNo:              noteNo,
+      date:                data.date               || '',
+      againstInvoiceNo:    data.againstInvoiceNo   || '',
+      againstInvoiceDate:  data.againstInvoiceDate || '',
+      reason:              data.reason             || '',
+      buyerName:           data.buyerName          || '',
+      buyerPhone:          data.buyerPhone         || '',
+      buyerEmail:          data.buyerEmail         || '',
+      buyerAddress:        data.buyerAddress       || '',
+      buyerGstin:          data.buyerGstin         || '',
+      buyerState:          data.buyerState         || '',
+      stateCode:           data.stateCode          || '',
+      subTotal:            data.subTotal           || 0,
+      cgstRate:            data.cgstRate           || 0,
+      sgstRate:            data.sgstRate           || 0,
+      igstRate:            data.igstRate           || 0,
+      cgstAmount:          data.cgstAmount         || 0,
+      sgstAmount:          data.sgstAmount         || 0,
+      igstAmount:          data.igstAmount         || 0,
+      taxAmount:           data.taxAmount          || 0,
+      grandTotal:          data.grandTotal         || 0,
+      items:               JSON.parse(itemsJson)
+    };
+    var emailResult = sendCreditDebitNoteEmail(emailPayload);
+    emailSent    = emailResult.sent;
+    emailMessage = emailResult.message;
+  } catch (emailErr) {
+    emailMessage = emailErr.toString();
+    Logger.log('Credit/Debit Note email error: ' + emailMessage);
+  }
+
+  return jsonOut({ success: true, emailSent: emailSent, emailMessage: emailMessage });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AUTO EMAIL — CREDIT/DEBIT NOTE PDF SENDER
+// ─────────────────────────────────────────────────────────────────────────
+
+function sendCreditDebitNoteEmail(data) {
+  const SELLER_EMAIL = 'itransform007@gmail.com';
+
+  const htmlContent = buildCreditDebitNoteHtmlGas(data);
+
+  const docLabel       = (data.noteType === 'DEBIT') ? 'Debit Note' : 'Credit Note';
+  const safeNoteNo      = (data.noteNo    || docLabel).replace(/\//g, '-');
+  const safeBuyerName   = (data.buyerName || 'Customer').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const pdfFileName     = safeBuyerName + ' - ' + safeNoteNo + '.pdf';
+
+  var tempFile = null;
+  var pdfBlob;
+  try {
+    tempFile = DriveApp.createFile(
+      Utilities.newBlob(htmlContent, 'text/html', 'temp_creditdebitnote.html')
+    );
+    pdfBlob = tempFile.getAs('application/pdf');
+    pdfBlob.setName(pdfFileName);
+  } finally {
+    if (tempFile) {
+      try { tempFile.setTrashed(true); } catch(e) { Logger.log('Temp file cleanup: ' + e); }
+    }
+  }
+
+  const rawDate = gasDateToYMD(data.date);
+  const fmtDate = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+  const subject = 'New ' + docLabel + ' Saved: ' + (data.noteNo || '') + ' | ' + (data.buyerName || 'Unknown Customer');
+
+  const emailBody =
+    'A new ' + docLabel.toLowerCase() + ' has been saved to Google Sheets.\n\n' +
+    docLabel + ' Details:\n' +
+    '  ' + docLabel + ' No. : ' + (data.noteNo    || '-') + '\n' +
+    '  Date          : ' + fmtDate + '\n' +
+    '  Customer      : ' + (data.buyerName || '-') + '\n' +
+    '  Against Invoice: ' + (data.againstInvoiceNo || '-') + '\n' +
+    '  Grand Total   : Rs.' + parseFloat(data.grandTotal || 0).toFixed(2) + '\n' +
+    (data.reason ? '  Reason        : ' + data.reason + '\n' : '') +
+    '\nPlease find the ' + docLabel.toLowerCase() + ' PDF attached.\n\n' +
+    '-- Enterprises ' + docLabel + ' System';
+
+  MailApp.sendEmail(SELLER_EMAIL, subject, emailBody, {
+    name:        'Enterprises — ' + docLabel + ' System',
+    attachments: [pdfBlob]
+  });
+
+  Logger.log(docLabel + ' email sent to ' + SELLER_EMAIL + ' for ' + (data.noteNo || ''));
+  return { sent: true, message: 'Email sent to ' + SELLER_EMAIL };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BUILD CREDIT/DEBIT NOTE HTML (GAS-side, inline-CSS, A4 portrait)
+// Mirrors buildInvoiceHtml's Tax Invoice layout exactly, retitled and with
+// the Challan/Delivery reference block swapped for Against Invoice No./Date
+// and Reason for Issue.
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildCreditDebitNoteHtmlGas(data) {
+  var items      = data.items || [];
+  var noteType   = (data.noteType === 'DEBIT') ? 'DEBIT' : 'CREDIT';
+  var docTitle   = (noteType === 'DEBIT') ? 'DEBIT NOTE' : 'CREDIT NOTE';
+  var noteLabel  = (noteType === 'DEBIT') ? 'Debit Note No.' : 'Credit Note No.';
+  var cgstRate   = parseFloat(data.cgstRate || 0), sgstRate = parseFloat(data.sgstRate || 0), igstRate = parseFloat(data.igstRate || 0);
+  var subTotal   = parseFloat(data.subTotal || 0);
+  var cgstAmt    = parseFloat(data.cgstAmount != null ? data.cgstAmount : subTotal * cgstRate / 100);
+  var sgstAmt    = parseFloat(data.sgstAmount != null ? data.sgstAmount : subTotal * sgstRate / 100);
+  var igstAmt    = parseFloat(data.igstAmount != null ? data.igstAmount : subTotal * igstRate / 100);
+  var grandTotal = parseFloat(data.grandTotal || (subTotal + cgstAmt + sgstAmt + igstAmt));
+
+  var rawDate  = gasDateToYMD(data.date);
+  var fmtDate  = rawDate ? rawDate.split('-').reverse().join('-') : '-';
+  var rawRefD  = gasDateToYMD(data.againstInvoiceDate);
+  var fmtRefD  = rawRefD ? rawRefD.split('-').reverse().join('-') : '-';
+
+  var itemRowsHtml = '';
+  items.forEach(function(item, idx) {
+    var amt  = parseFloat(item.amount || 0).toFixed(2);
+    var rate = parseFloat(item.rate   || 0).toFixed(2);
+    itemRowsHtml +=
+      '<tr style="height:22px;">' +
+        '<td style="border-right:1px solid #000;text-align:center;">' + (idx + 1) + '</td>' +
+        '<td style="border-right:1px solid #000;padding:2px 5px;"><strong>' + (item.desc || '') + '</strong></td>' +
+        '<td style="border-right:1px solid #000;text-align:center;font-family:monospace;">' + (item.hsn || '') + '</td>' +
+        '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;"><strong>' + (item.qty || '') + '</strong></td>' +
+        '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-family:monospace;">' + rate + '</td>' +
+        '<td style="border-right:1px solid #000;text-align:center;">' + (item.unit || 'Nos') + '</td>' +
+        '<td style="text-align:right;padding-right:4px;font-family:monospace;"><strong>' + amt + '</strong></td>' +
+      '</tr>';
+  });
+
+  var taxRowsHtml = '';
+  if (cgstAmt > 0) {
+    taxRowsHtml +=
+      '<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">CGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">' + cgstRate + '%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">' + cgstAmt.toFixed(2) + '</td></tr>' +
+      '<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">SGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">' + sgstRate + '%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">' + sgstAmt.toFixed(2) + '</td></tr>';
+  } else if (igstAmt > 0) {
+    taxRowsHtml +=
+      '<tr style="height:22px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;font-style:italic;">IGST</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;text-align:right;padding-right:4px;">' + igstRate + '%</td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="text-align:right;padding-right:4px;font-family:monospace;">' + igstAmt.toFixed(2) + '</td></tr>';
+  }
+
+  var filledRows  = items.length + (cgstAmt > 0 ? 2 : (igstAmt > 0 ? 1 : 0));
+  var blankCount  = Math.max(0, 22 - filledRows);
+  var blankRows   = '';
+  for (var i = 0; i < blankCount; i++) {
+    blankRows += '<tr style="height:26px;"><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td style="border-right:1px solid #000;"></td><td></td></tr>';
+  }
+
+  var declaration = (noteType === 'DEBIT')
+    ? 'We declare that this debit note shows the correct amount additionally payable by the buyer for the reason stated above, and is issued as a valid GST document as per prevailing government regulations.'
+    : 'We declare that this credit note shows the correct amount adjustable in favour of the buyer for the reason stated above, and is issued as a valid GST document as per prevailing government regulations.';
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+  '<style>' +
+    '@page{size:A4 portrait;margin:0;}' +
+    'html,body{margin:0;padding:0;width:210mm;height:297mm;overflow:hidden;}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;line-height:1.3;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+    '.pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:8mm;box-sizing:border-box;overflow:hidden;}' +
+    '.main-box{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:2px;flex:1;}' +
+    '.main-box td{vertical-align:top;padding:4px;}' +
+    '.inner-grid{width:100%;border-collapse:collapse;height:100%;}' +
+    '.inner-grid td{vertical-align:top;padding:3px 5px;}' +
+    '.b-right{border-right:1px solid #000;}.b-bottom{border-bottom:1px solid #000;}.b-top{border-top:1px solid #000;}' +
+    '.items-grid{width:100%;border-collapse:collapse;}' +
+    '.items-grid th{font-weight:bold;font-size:10px;border-bottom:1px solid #000;border-right:1px solid #000;padding:5px;background:#fff;text-transform:uppercase;}' +
+    '.items-grid td{padding:3px 5px;font-size:11px;border-right:1px solid #000;}' +
+    '.items-grid th:last-child,.items-grid td:last-child{border-right:none;}' +
+    '.tr{text-align:right;}.tc{text-align:center;}.bold{font-weight:bold;}' +
+  '</style></head><body>' +
+  '<div class="pc">' +
+    '<div style="text-align:center;font-weight:bold;text-transform:uppercase;font-size:14px;letter-spacing:0.5px;margin-bottom:3px;">' + docTitle + '</div>' +
+    '<table class="main-box" cellpadding="0" cellspacing="0">' +
+      '<tr class="b-bottom" style="height:75px;">' +
+        '<td width="50%" class="b-right">' +
+          '<div class="bold" style="font-size:12px;">' + COMPANY.name + '</div>' +
+          '<div style="margin-top:3px;">' + COMPANY.address + '</div>' +
+          '<div style="margin-top:3px;"><span class="bold">Ph:</span> ' + COMPANY.phone + ' &nbsp;|&nbsp; <span class="bold">Email:</span> ' + COMPANY.email + '</div>' +
+          '<div><span class="bold">Web:</span> ' + COMPANY.website + '</div>' +
+          '<div style="margin-top:3px;">GSTIN/UIN: <strong>' + COMPANY.gstin + '</strong></div>' +
+          '<div>State Name: <strong>' + COMPANY.state + '</strong>, Code: <strong>' + COMPANY.stateCode + '</strong></div>' +
+        '</td>' +
+        '<td width="50%" style="padding:0;">' +
+          '<table class="inner-grid" cellpadding="0" cellspacing="0">' +
+            '<tr class="b-bottom"><td class="b-right" width="50%">' + noteLabel + '<br><strong>' + (data.noteNo || '-') + '</strong></td><td>Dated<br><strong>' + fmtDate + '</strong></td></tr>' +
+            '<tr class="b-bottom"><td class="b-right">Against Invoice No.<br><strong>' + (data.againstInvoiceNo || '-') + '</strong></td><td>Invoice Date<br><strong>' + fmtRefD + '</strong></td></tr>' +
+            '<tr><td class="b-right">Reason<br><strong>' + (data.reason || '-') + '</strong></td><td>Destination<br><strong>' + (data.buyerState || '-') + '</strong></td></tr>' +
+          '</table>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="b-bottom" style="height:85px;">' +
+        '<td colspan="2">' +
+          '<div style="font-size:9px;text-transform:uppercase;color:#444;">Buyer (Bill To)</div>' +
+          '<div class="bold" style="margin-top:2px;font-size:12px;">' + (data.buyerName || '-') + '</div>' +
+          '<div style="margin-top:2px;white-space:pre-line;">' + (data.buyerAddress || '-') + '</div>' +
+          '<div style="margin-top:3px;">GSTIN/UIN: <strong>' + (data.buyerGstin || 'Unregistered') + '</strong>&nbsp;&nbsp;State: <strong>' + (data.buyerState || 'Maharashtra') + '</strong>, Code: <strong>' + (data.stateCode || '27') + '</strong></div>' +
+        '</td>' +
+      '</tr>' +
+      '<tr><td colspan="2" style="padding:0;">' +
+        '<table class="items-grid">' +
+          '<thead><tr>' +
+            '<th width="6%" class="tc">Sl</th>' +
+            '<th width="44%" style="text-align:left;">Description of Goods</th>' +
+            '<th width="11%" class="tc">HSN/SAC</th>' +
+            '<th width="10%" class="tr">Quantity</th>' +
+            '<th width="10%" class="tr">Rate</th>' +
+            '<th width="7%" class="tc">per</th>' +
+            '<th width="12%" class="tr" style="border-right:none;">Amount</th>' +
+          '</tr></thead>' +
+          '<tbody>' + itemRowsHtml + taxRowsHtml + blankRows + '</tbody>' +
+          '<tfoot>' +
+            '<tr style="border-top:1px solid #000;font-weight:bold;height:24px;">' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;text-align:right;padding-right:4px;">Total</td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="border-right:1px solid #000;"></td>' +
+              '<td style="text-align:right;padding-right:4px;font-size:12px;">&#x20B9;' + grandTotal.toFixed(2) + '</td>' +
+            '</tr>' +
+          '</tfoot>' +
+        '</table>' +
+      '</td></tr>' +
+      '<tr class="b-top b-bottom"><td colspan="2" style="padding:6px;">' +
+        '<div style="font-size:9px;color:#555;text-transform:uppercase;font-weight:bold;">Amount ' + (noteType === 'DEBIT' ? 'Debited' : 'Credited') + ' (in words):</div>' +
+        '<div class="bold" style="font-size:11px;margin-top:2px;">INR ' + numberToWordsGas(Math.round(grandTotal)) + '</div>' +
+      '</td></tr>' +
+      '<tr><td colspan="2" style="padding:0;">' +
+        '<table width="100%" style="border-collapse:collapse;" cellpadding="0" cellspacing="0">' +
+          '<tr style="vertical-align:bottom;">' +
+            '<td width="55%" class="b-right" style="font-size:10px;padding:6px;vertical-align:top;">' +
+              '<div class="bold" style="margin-top:8px;font-size:9px;">Declaration:</div>' +
+              '<div style="font-size:9px;color:#222;text-align:justify;">' + declaration + '</div>' +
+            '</td>' +
+            '<td width="45%" style="padding:6px;vertical-align:bottom;text-align:right;">' +
+              '<div style="font-size:10px;">For <strong>' + COMPANY.name + '</strong></div>' +
+              '<div style="font-weight:bold;text-transform:uppercase;font-size:10px;border-top:1px dashed #000;padding-top:4px;width:160px;text-align:center;margin-left:auto;margin-top:55px;">Authorised Signatory</div>' +
+            '</td>' +
+          '</tr>' +
+        '</table>' +
+      '</td></tr>' +
+    '</table>' +
+    '<div style="text-align:center;font-size:9px;margin-top:4px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;">SUBJECT TO MAHARASHTRA JURISDICTION</div>' +
+    '<div style="text-align:center;font-size:9px;color:#555;margin-top:2px;">This is a Computer Generated ' + (docTitle.charAt(0) + docTitle.slice(1).toLowerCase()) + '</div>' +
+  '</div></body></html>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AMC CONTRACTS HANDLERS (v14 addition)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Returns all AMC contracts from the AMC_Contracts sheet.
+ */
+function handleGetAMCData() {
+  try {
+    const sheet = getSheet(SHEET_AMC);
+    const data  = sheet.getDataRange().getValues();
+    if (data.length <= 1) return jsonOut({ success: true, contracts: [] });
+    const headers = data[0].map(h => String(h).trim());
+    const contracts = data.slice(1).map(function(row) {
+      var obj = {};
+      headers.forEach(function(h, i) {
+        var val = row[i];
+        if (val instanceof Date) val = gasDateToYMD(val);
+        obj[h] = val !== undefined && val !== null ? String(val) : '';
+      });
+      return obj;
+    }).filter(function(c) { return c['Contract No'] && c['Customer Name']; });
+    return jsonOut({ success: true, contracts: contracts });
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+/**
+ * Save (add or update) an AMC contract.
+ * body.data = { contractNo, customerName, phone, email, service, startDate, expiryDate, value, freq, notes }
+ * body.rowIndex = row index (0-based, excluding header) if updating, or -1 if adding new.
+ */
+function handleSaveAMCContract(body, username) {
+  try {
+    const d    = body.data || {};
+    const idx  = parseInt(body.rowIndex, 10); // -1 = new
+    const sheet = getSheet(SHEET_AMC);
+    const ts    = new Date().toISOString();
+    const rowData = [
+      d.contractNo   || '',
+      d.customerName || '',
+      d.phone        || '',
+      d.email        || '',
+      d.service      || '',
+      d.startDate    || '',
+      d.expiryDate   || '',
+      d.value        || '',
+      d.freq         || 'Annual',
+      d.notes        || '',
+      username,
+      ts
+    ];
+    if (idx >= 0) {
+      // Update existing row (idx is 0-based data row, add 2 for header + 1-based)
+      const sheetRow = idx + 2;
+      sheet.getRange(sheetRow, 1, 1, rowData.length).setValues([rowData]);
+    } else {
+      sheet.appendRow(rowData);
+    }
+    return jsonOut({ success: true, message: 'AMC contract saved.' });
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+/**
+ * Delete an AMC contract by contract number.
+ */
+function handleDeleteAMCContract(body, username) {
+  try {
+    const contractNo = (body.contractNo || '').trim();
+    if (!contractNo) return jsonOut({ success: false, message: 'Contract No is required.' });
+    const sheet = getSheet(SHEET_AMC);
+    const data  = sheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === contractNo) {
+        sheet.deleteRow(i + 1);
+        return jsonOut({ success: true, message: 'Contract deleted.' });
+      }
+    }
+    return jsonOut({ success: false, message: 'Contract not found.' });
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CERTIFICATES HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Sheet: "Certificates"
+// Columns: Cert No | Cert Type | Issue Date | Valid Until | Ref No | Site |
+//          Recipient Name | Recipient Address | Recipient Phone | Recipient Email |
+//          Items (JSON) | Remarks | Saved By | Timestamp
+//
+// Auto-increment format: CERT/YY-YY/NNN  e.g. CERT/26-27/001
+// ─────────────────────────────────────────────────────────────────────────
+//
+// SETUP: Add these two lines to the existing getSheet() function inside the
+// sheet initialization block (after the SHEET_AMC block):
+//
+//   } else if (name === 'Certificates') {
+//     sheet.appendRow([
+//       'Cert No', 'Cert Type', 'Issue Date', 'Valid Until', 'Ref No', 'Site',
+//       'Recipient Name', 'Recipient Address', 'Recipient Phone', 'Recipient Email',
+//       'Items (JSON)', 'Remarks', 'Saved By', 'Timestamp'
+//     ]);
+//   }
+//
+// NOTE: If a "Certificates" tab already exists in your spreadsheet from an
+// earlier version, getSheet() will NOT rewrite its header row (it only sets
+// headers the first time the sheet is created). Manually update row 1 of the
+// existing tab to match the column list above, or delete the tab and let the
+// script recreate it on the next save.
+//
+// SETUP: Add these lines to doGet() router (before the final unknown-action return):
+//
+//   if (action === 'getNextCertNo')    return handleGetNextCertNo();
+//   if (action === 'getCertificates')  return handleGetCertificates();
+//
+// SETUP: Add this line to doPost() router (before the final unknown-action return):
+//
+//   if (action === 'saveCertificate')  return handleSaveCertificate(body, session.username);
+//
+// ─────────────────────────────────────────────────────────────────────────
+
+const SHEET_CERTIFICATES = 'Certificates';
+
+function handleGetNextCertNo() {
+  try {
+    const sheet = getSheet(SHEET_CERTIFICATES);
+    const data  = sheet.getDataRange().getValues();
+
+    const existingNos = data.slice(1)
+      .map(r => (r[0] || '').toString().trim())
+      .filter(v => v !== '');
+
+    const now     = new Date();
+    const yr      = now.getFullYear();
+    const mo      = now.getMonth() + 1;
+    const fyStart = mo >= 4 ? yr : yr - 1;
+    const fyEnd   = fyStart + 1;
+    const fySuffix = String(fyStart).slice(-2) + '-' + String(fyEnd).slice(-2);
+    const prefix   = 'CERT/' + fySuffix + '/';
+
+    let maxSeq = 0;
+    existingNos.forEach(function(no) {
+      if (no.toUpperCase().startsWith(prefix.toUpperCase())) {
+        const parts = no.split('/');
+        const seq   = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    });
+
+    const certNo = prefix + String(maxSeq + 1).padStart(3, '0');
+    return jsonOut({ success: true, certNo: certNo });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+function handleGetCertificates() {
+  try {
+    const sheet   = getSheet(SHEET_CERTIFICATES);
+    const data    = sheet.getDataRange().getValues();
+    if (data.length <= 1) return jsonOut({ success: true, certificates: [] });
+    const headers = data[0];
+    const certificates = data.slice(1).map(function(row) {
+      var obj = {};
+      headers.forEach(function(h, i) { obj[h] = row[i] !== undefined ? row[i] : ''; });
+      return obj;
+    }).filter(function(c) { return c['Cert No']; });
+    return jsonOut({ success: true, certificates: certificates });
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
+
+function handleSaveCertificate(body, username) {
+  try {
+    const sheet  = getSheet(SHEET_CERTIFICATES);
+    const certNo = (body.certNo || '').toString().trim();
+
+    if (!certNo) return jsonOut({ success: false, message: 'Certificate No. is required' });
+
+    const allData = sheet.getDataRange().getValues();
+    const exists  = allData.slice(1).some(function(r) {
+      return (r[0] || '').toString().trim().toLowerCase() === certNo.toLowerCase();
+    });
+    if (exists) return jsonOut({ success: false, message: 'Duplicate certificate number — ' + certNo + ' already exists' });
+
+    const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    sheet.appendRow([
+      certNo,
+      body.certType          || '',
+      body.issueDate         || '',
+      body.validUntil        || '',
+      body.refNo             || '',
+      body.site              || '',
+      body.recipientName     || '',
+      body.recipientAddress  || '',
+      body.recipientPhone    || '',
+      body.recipientEmail    || '',
+      body.recipientGstin    || '',
+      body.itemsJson         || '[]',
+      body.remarks           || '',
+      username,
+      now
+    ]);
+
+    return jsonOut({ success: true });
+
+  } catch (err) {
+    return jsonOut({ success: false, message: err.toString() });
+  }
+}
