@@ -296,51 +296,265 @@
   .toast.error { background: rgba(45,10,20,0.92); border-color: rgba(251,113,133,0.4); }
   .toast.success { background: rgba(8,35,26,0.92); border-color: rgba(52,211,153,0.4); }
 
-  /* LOGIN */
+  /* ══════════════════════════════════════════════════════════════════════
+     LOGIN — Aurora glass shell
+     Every rule is scoped under #login-overlay and every keyframe is
+     prefixed lg-, because the app shell already owns .card, .field,
+     .brand, .btn and its own custom properties. Nothing here can reach
+     the application UI.
+     The typefaces are the two the app already imports, so this adds no
+     new network dependency.
+     ═════════════════════════════════════════════════════════════════════ */
   #login-overlay {
-    position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
-    background:
-      radial-gradient(60vw 60vw at 12% -8%, rgba(108,99,255,0.28), transparent 58%),
-      radial-gradient(50vw 50vw at 105% 8%, rgba(0,217,255,0.20), transparent 55%),
-      radial-gradient(55vw 55vw at 15% 112%, rgba(168,85,247,0.22), transparent 58%),
-      var(--bg);
+    position: fixed; inset: 0; z-index: 9999; overflow: hidden;
+    display: grid; place-items: center; padding: 32px 16px;
+    background: radial-gradient(120% 100% at 50% 0%, #0a1030 0%, #050816 60%);
+    --lg-primary: #6C63FF; --lg-secondary: #00D9FF; --lg-accent: #A855F7;
+    --lg-highlight: #22D3EE; --lg-muted: #94A3B8; --lg-danger: #FB7185;
+    --lg-brd: rgba(255,255,255,0.15); --lg-brd-hi: rgba(255,255,255,0.28);
+    --lg-ease: cubic-bezier(0.2,0.7,0.2,1);
+    --lg-ease-out: cubic-bezier(0.16,1,0.3,1);
+    --mx: 0; --my: 0;
   }
   #login-overlay.hidden { display: none; }
-  .login-card {
-    background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.03));
-    border-radius: 26px; padding: 40px; width: 100%; max-width: 360px;
-    border: 1px solid var(--border2); backdrop-filter: blur(26px) saturate(150%); -webkit-backdrop-filter: blur(26px) saturate(150%);
-    box-shadow: 0 30px 90px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.06) inset; margin: 16px;
+  #login-overlay *, #login-overlay *::before, #login-overlay *::after { box-sizing: border-box; }
+
+  /* ---------- background ---------- */
+  #login-overlay .lg-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
+  #login-overlay .lg-parallax {
+    position: absolute; inset: -8%; pointer-events: none;
+    transform: translate3d(calc(var(--mx) * -14px), calc(var(--my) * -10px), 0);
+    transition: transform 0.6s var(--lg-ease-out), opacity 0.6s var(--lg-ease);
   }
-  .login-logo { text-align: center; margin-bottom: 32px; }
-  .login-logo-icon { font-size: 36px; margin-bottom: 8px; filter: drop-shadow(0 0 16px rgba(108,99,255,0.55)); }
-  .login-logo h1 {
-    font-family: var(--font-display); font-size: 18px; font-weight: 700;
-    background: linear-gradient(135deg, #fff, var(--secondary) 130%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  #login-overlay .lg-blob { position: absolute; border-radius: 50%; will-change: transform; opacity: 0.85; }
+  #login-overlay .lg-blob-a { width: 60vmax; height: 60vmax; left: -18vmax; top: -22vmax;
+    background: radial-gradient(circle, rgba(108,99,255,0.55), rgba(108,99,255,0) 62%); animation: lg-drift-a 34s ease-in-out infinite; }
+  #login-overlay .lg-blob-b { width: 52vmax; height: 52vmax; right: -16vmax; top: -8vmax;
+    background: radial-gradient(circle, rgba(0,217,255,0.36), rgba(0,217,255,0) 64%); animation: lg-drift-b 42s ease-in-out infinite; }
+  #login-overlay .lg-blob-c { width: 56vmax; height: 56vmax; left: -10vmax; bottom: -26vmax;
+    background: radial-gradient(circle, rgba(168,85,247,0.34), rgba(168,85,247,0) 63%); animation: lg-drift-c 38s ease-in-out infinite; }
+  #login-overlay .lg-blob-d { width: 38vmax; height: 38vmax; right: -8vmax; bottom: -16vmax;
+    background: radial-gradient(circle, rgba(34,211,238,0.22), rgba(34,211,238,0) 66%); animation: lg-drift-a 46s ease-in-out infinite reverse; }
+  @keyframes lg-drift-a { 50% { transform: translate3d(6vmax,4vmax,0) scale(1.12); } }
+  @keyframes lg-drift-b { 50% { transform: translate3d(-5vmax,6vmax,0) scale(1.08); } }
+  @keyframes lg-drift-c { 50% { transform: translate3d(7vmax,-5vmax,0) scale(1.1); } }
+  #login-overlay.is-typing .lg-parallax { opacity: 0.42; }
+
+  #login-overlay .lg-grid {
+    position: absolute; inset: 0; opacity: 0.5; pointer-events: none;
+    transition: opacity 0.6s var(--lg-ease);
+    background-image: linear-gradient(rgba(148,163,184,0.07) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(148,163,184,0.07) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(85% 70% at 50% 45%, #000 20%, transparent 78%);
+            mask-image: radial-gradient(85% 70% at 50% 45%, #000 20%, transparent 78%);
   }
-  .login-logo p { font-size: 11px; color: var(--text3); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
-  .login-error { background: var(--danger-bg); color: var(--danger); border: 1px solid rgba(251,113,133,0.4); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; font-weight: 500; margin-bottom: 16px; display: none; }
-  .login-field { margin-bottom: 16px; }
-  .login-field label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.6px; display: block; margin-bottom: 6px; }
-  .login-field input {
-    border: 1px solid var(--border2); border-radius: var(--radius); padding: 11px 14px 11px 42px; font-size: 14px; font-weight: 500;
-    background-repeat: no-repeat; background-position: 14px center; background-size: 17px;
+  #login-overlay.is-typing .lg-grid { opacity: 0.22; }
+
+  /* the orb is the only background element that takes the pointer */
+  #login-overlay #lg-orb { position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; pointer-events: auto; cursor: grab; touch-action: none; }
+  #login-overlay #lg-orb.is-drag { cursor: grabbing; }
+  #login-overlay .lg-vignette { position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 45%, transparent 42%, rgba(5,8,22,0.72) 100%); }
+
+  /* ---------- layout ---------- */
+  #login-overlay .lg-page { position: relative; z-index: 1; width: 100%;
+    display: grid; place-items: center; pointer-events: none; }
+  #login-overlay .lg-stack { width: 100%; max-width: 430px; perspective: 1500px; pointer-events: auto; }
+
+  /* ---------- brand ---------- */
+  #login-overlay .lg-brand { display: grid; justify-items: center; gap: 13px; margin-bottom: 24px;
+    animation: lg-fade-up 0.8s var(--lg-ease-out) 0.15s both; }
+  #login-overlay .lg-logo { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px;
+    background: linear-gradient(150deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+    border: 1px solid var(--lg-brd);
+    box-shadow: 0 10px 34px -10px rgba(108,99,255,0.8), inset 0 1px 0 rgba(255,255,255,0.24);
+    animation: lg-float 6.5s ease-in-out infinite; }
+  @supports (backdrop-filter: blur(2px)) { #login-overlay .lg-logo { backdrop-filter: blur(12px); } }
+  #login-overlay .lg-logo svg { width: 32px; height: 32px; filter: drop-shadow(0 0 8px rgba(0,217,255,0.65)); }
+  @keyframes lg-float { 50% { transform: translateY(-7px); } }
+  #login-overlay .lg-brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 15px;
+    letter-spacing: 0.3em; text-transform: uppercase; margin: 0; text-align: center;
+    background: linear-gradient(90deg, #fff, #b9c7ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #login-overlay .lg-brand p { margin: 0; font-size: 10.5px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: #64748B; }
+
+  /* ---------- glass card ---------- */
+  #login-overlay .lg-card {
+    position: relative; border-radius: 28px; padding: 34px 32px 28px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035) 46%, rgba(255,255,255,0.06));
+    border: 1px solid var(--lg-brd);
+    box-shadow: 0 25px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(108,99,255,0.08),
+                inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.35);
+    overflow: hidden; isolation: isolate;
+    transform: translate3d(calc(var(--mx) * 4px), calc(var(--my) * 3px), 0)
+               rotateX(calc(var(--my) * -2.2deg)) rotateY(calc(var(--mx) * 2.6deg));
+    transition: transform 0.5s var(--lg-ease-out);
+    animation: lg-card-in 1s var(--lg-ease-out) 0.05s both;
   }
-  #login-username { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21a8 8 0 1 0-16 0'/%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3C/svg%3E"); }
-  #login-password { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='9' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E"); padding-right: 42px; }
-  .login-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(108,99,255,0.16), 0 0 20px rgba(108,99,255,0.25); }
-  .login-pwd-wrap { position: relative; }
-  .login-pwd-wrap input { padding-right: 40px; }
-  .login-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text3); font-size: 16px; transition: color 0.15s ease; }
-  .login-eye:hover { color: var(--text); }
-  .login-btn {
-    width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none;
-    border-radius: var(--radius); padding: 13px; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; cursor: pointer; margin-top: 8px;
-    transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease); box-shadow: 0 14px 34px rgba(108,99,255,0.35);
+  @supports (backdrop-filter: blur(2px)) {
+    #login-overlay .lg-card { backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%);
+      background: linear-gradient(160deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025) 46%, rgba(255,255,255,0.05)); }
   }
-  .login-btn:hover { transform: translateY(-2px); box-shadow: 0 18px 44px rgba(108,99,255,0.48); }
-  .login-btn:active { transform: translateY(0); }
-  .login-footer { text-align: center; font-size: 12px; color: var(--text3); margin-top: 28px; }
+  #login-overlay .lg-card::before { content: ""; position: absolute; inset: 0; z-index: -1;
+    background: radial-gradient(120% 90% at 50% 40%, rgba(5,8,22,0.34), rgba(5,8,22,0.6)); }
+  #login-overlay .lg-glare { position: absolute; width: 62%; aspect-ratio: 1; left: 19%; top: -24%;
+    pointer-events: none; z-index: -1;
+    background: radial-gradient(circle, rgba(255,255,255,0.13), transparent 62%);
+    transform: translate3d(calc(var(--mx) * 70px), calc(var(--my) * 54px), 0);
+    transition: transform 0.45s var(--lg-ease-out); }
+  #login-overlay .lg-sweep { position: absolute; inset: 0; pointer-events: none; z-index: -1;
+    overflow: hidden; border-radius: inherit; }
+  #login-overlay .lg-sweep i { position: absolute; top: -60%; bottom: -60%; width: 46%; left: -60%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,0.1), transparent);
+    transform: skewX(-14deg); animation: lg-sweep 9s ease-in-out infinite; }
+  @keyframes lg-sweep { 0%, 58% { left: -60%; } 100% { left: 120%; } }
+  @keyframes lg-card-in { from { opacity: 0; transform: translate3d(0,42px,0) scale(0.965); } }
+  @keyframes lg-fade-up { from { opacity: 0; transform: translateY(16px); } }
+
+  /* ---------- type ---------- */
+  #login-overlay .lg-head { margin-bottom: 22px; }
+  #login-overlay .lg-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 28px;
+    line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 6px; color: #fff; }
+  #login-overlay .lg-head p { margin: 0; color: var(--lg-muted); font-size: 13.5px; }
+
+  /* ---------- fields ---------- */
+  #login-overlay .login-field { margin-bottom: 15px; }
+  #login-overlay .login-field label { display: block; margin-bottom: 7px; font-size: 12.5px;
+    font-weight: 500; color: var(--lg-muted); letter-spacing: 0; text-transform: none;
+    transition: color 0.2s var(--lg-ease); }
+  #login-overlay .login-field:focus-within label { color: var(--lg-secondary); }
+  #login-overlay .lg-box { position: relative; display: flex; align-items: center; border-radius: 14px;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.11);
+    transition: border-color 0.22s var(--lg-ease), background 0.22s var(--lg-ease),
+                box-shadow 0.22s var(--lg-ease), transform 0.22s var(--lg-ease); }
+  #login-overlay .lg-box > svg { position: absolute; left: 14px; width: 17px; height: 17px;
+    fill: none; stroke: var(--lg-muted); stroke-width: 1.7; pointer-events: none;
+    transition: stroke 0.2s var(--lg-ease); }
+  #login-overlay .lg-box input { width: 100%; height: 52px; padding: 0 14px 0 44px;
+    background: none; border: 0; outline: none; color: #fff;
+    font: 400 15px/1 var(--font-ui, Inter, system-ui, sans-serif); }
+  #login-overlay .lg-box input::placeholder { color: #64748B; }
+  #login-overlay .lg-box:focus-within { border-color: rgba(108,99,255,0.75);
+    background: rgba(255,255,255,0.075);
+    box-shadow: 0 0 0 4px rgba(108,99,255,0.16), 0 0 26px -6px rgba(0,217,255,0.5);
+    transform: translateY(-1px); }
+  #login-overlay .lg-box:focus-within > svg { stroke: var(--lg-secondary); }
+  #login-overlay .lg-box input:-webkit-autofill { -webkit-text-fill-color: #fff;
+    -webkit-box-shadow: 0 0 0 60px #0d1330 inset; caret-color: #fff; }
+  #login-overlay .login-pwd-wrap { position: relative; display: flex; align-items: center; width: 100%; }
+  #login-overlay .login-pwd-wrap input { padding-right: 50px; }
+
+  #login-overlay .login-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 40px; height: 40px; display: grid; place-items: center;
+    background: none; border: 0; border-radius: 10px; color: var(--lg-muted);
+    cursor: pointer; font-size: 15px; line-height: 1;
+    transition: color 0.18s var(--lg-ease), background 0.18s var(--lg-ease); }
+  #login-overlay .login-eye:hover { color: #fff; background: rgba(255,255,255,0.07); }
+  #login-overlay .login-eye svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+  #login-overlay .login-eye .lg-off { display: none; }
+  #login-overlay .login-eye.is-on { color: var(--lg-secondary); }
+  #login-overlay .login-eye.is-on .lg-on { display: none; }
+  #login-overlay .login-eye.is-on .lg-off { display: block; }
+
+  /* ---------- error note ----------
+     doLogin() writes to this element with textContent and shows it with an
+     inline display:block, so it must carry no child elements and must lay
+     out as a block. The icon is a ::before, not a child SVG, and the icon
+     therefore survives every message change. */
+  #login-overlay .login-error {
+    display: none; position: relative; margin-bottom: 18px;
+    padding: 12px 14px 12px 40px; border-radius: 13px;
+    font-size: 13px; font-weight: 400; line-height: 1.45;
+    border: 1px solid rgba(251,113,133,0.35); background: rgba(251,113,133,0.1); color: #FFE0E4;
+    animation: lg-note-in 0.4s var(--lg-ease-out);
+  }
+  #login-overlay .login-error::before {
+    content: ""; position: absolute; left: 14px; top: 13px; width: 17px; height: 17px;
+    background: no-repeat center/17px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FB7185' stroke-width='1.8' stroke-linecap='round'%3E%3Cpath d='M12 8v5'/%3E%3Cpath d='M12 16.5h.01'/%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3C/svg%3E");
+  }
+  @keyframes lg-note-in { from { opacity: 0; transform: translateY(-8px); } }
+
+  /* ---------- submit ----------
+     doLogin() sets btn.textContent while signing in, which would wipe any
+     child markup, so the spinner is a ::after on :disabled instead of a
+     nested span. No JavaScript change is needed for it to work. */
+  #login-overlay .login-btn {
+    position: relative; width: 100%; height: 54px; margin-top: 6px;
+    border: 0; border-radius: 14px; cursor: pointer; color: #fff;
+    font: 600 13.5px/1 var(--font-ui, Inter, system-ui, sans-serif);
+    letter-spacing: 0.14em; text-transform: uppercase;
+    background: linear-gradient(120deg, #5B52FF, #6C63FF 38%, #22D3EE);
+    box-shadow: 0 12px 30px -10px rgba(108,99,255,0.85), inset 0 1px 0 rgba(255,255,255,0.3);
+    overflow: hidden; isolation: isolate;
+    transition: transform 0.18s var(--lg-ease-out), box-shadow 0.22s var(--lg-ease), filter 0.22s var(--lg-ease);
+  }
+  #login-overlay .login-btn::before { content: ""; position: absolute; inset: 0; z-index: -1;
+    background: linear-gradient(100deg, transparent 32%, rgba(255,255,255,0.42) 50%, transparent 68%);
+    transform: translateX(-120%); transition: transform 0.7s var(--lg-ease-out); }
+  #login-overlay .login-btn:hover { transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 18px 40px -10px rgba(108,99,255,1), 0 0 34px -6px rgba(34,211,238,0.65); filter: saturate(1.15); }
+  #login-overlay .login-btn:hover::before { transform: translateX(120%); }
+  #login-overlay .login-btn:active { transform: scale(0.98); }
+  #login-overlay .login-btn:disabled { cursor: default; transform: none; color: transparent; }
+  #login-overlay .login-btn:disabled::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 19px; height: 19px;
+    margin: -9.5px 0 0 -9.5px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.28); border-top-color: #fff;
+    animation: lg-spin 0.7s linear infinite;
+  }
+  @keyframes lg-spin { to { transform: rotate(360deg); } }
+
+  #login-overlay .login-footer { margin: 22px 0 0; text-align: center;
+    font-size: 12px; color: #64748B; }
+  #login-overlay .lg-hint { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    z-index: 1; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: #3f4c6b; pointer-events: none; margin: 0;
+    animation: lg-fade-up 1s var(--lg-ease-out) 1.4s both; }
+  @media (hover: none) { #login-overlay .lg-hint { display: none; } }
+  #login-overlay :focus-visible { outline: 2px solid var(--lg-secondary); outline-offset: 3px; border-radius: 6px; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 520px) {
+    #login-overlay { padding: 20px 14px; }
+    #login-overlay .lg-stack { max-width: none; }
+    #login-overlay .lg-card { padding: 26px 20px 22px; border-radius: 24px; }
+    #login-overlay .lg-head h2 { font-size: 24px; }
+    #login-overlay .lg-logo { width: 54px; height: 54px; border-radius: 17px; }
+    #login-overlay .lg-brand { margin-bottom: 18px; }
+    #login-overlay .lg-grid { background-size: 44px 44px; }
+    @supports (backdrop-filter: blur(2px)) {
+      #login-overlay .lg-card { backdrop-filter: blur(11px) saturate(130%); -webkit-backdrop-filter: blur(11px) saturate(130%); }
+    }
+    #login-overlay .lg-card::before { background: rgba(5,8,22,0.66); }
+  }
+  @media (hover: none) {
+    #login-overlay .lg-card { transform: none; }
+    #login-overlay .lg-glare { display: none; }
+    #login-overlay #lg-orb { cursor: default; }
+  }
+
+  /* ---------- accessibility preferences ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    #login-overlay .lg-blob, #login-overlay .lg-logo,
+    #login-overlay .lg-sweep i, #login-overlay .login-btn::before { animation: none !important; }
+    #login-overlay .lg-brand, #login-overlay .lg-card, #login-overlay .login-error,
+    #login-overlay .lg-hint { animation: none !important; opacity: 1 !important; transform: none !important; }
+    #login-overlay .lg-card, #login-overlay .lg-parallax, #login-overlay .lg-glare { transition: none; transform: none !important; }
+    #login-overlay .login-btn:hover, #login-overlay .lg-box:focus-within { transform: none; }
+    #login-overlay .login-btn:disabled::after { animation: none; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    #login-overlay .lg-card { backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+      background: #0b1130 !important; border-color: rgba(255,255,255,0.28); }
+    #login-overlay .lg-logo { backdrop-filter: none; }
+  }
+  @media (forced-colors: active) {
+    #login-overlay .lg-bg, #login-overlay .lg-glare,
+    #login-overlay .lg-sweep, #login-overlay .lg-hint { display: none; }
+    #login-overlay .lg-card { border: 1px solid CanvasText; background: Canvas; }
+  }
 
   /* LEDGER */
   .cr { color: var(--success); } .dr { color: var(--danger); } .ledger-running { font-weight: 600; }
@@ -561,8 +775,6 @@
     .report-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap !important; }
     .report-tab { white-space: nowrap; font-size: 12px; padding: 7px 12px; }
 
-    /* ── LOGIN CARD ──────────────────────────────────── */
-    .login-card { padding: 28px 20px; }
   }
 
   /* ── Extra-small phones ─── */
@@ -577,29 +789,91 @@
 <!-- SIDEBAR OVERLAY (mobile) -->
 <div id="sidebar-overlay" onclick="closeSidebar()"></div>
 
-<!-- LOGIN OVERLAY -->
+<!-- LOGIN OVERLAY — Aurora glass shell.
+     Every id and handler the application already depends on is unchanged:
+     login-username, login-password, login-error, login-btn, toggleLoginPwd(),
+     doLogin(), and #login-overlay.hidden as the show/hide switch. -->
 <div id="login-overlay">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="login-logo-icon">🏢</div>
-      <h1>Itransform Technology</h1>
-      <p>Invoice Management System</p>
+
+  <div class="lg-bg" aria-hidden="true">
+    <div class="lg-parallax">
+      <span class="lg-blob lg-blob-a"></span><span class="lg-blob lg-blob-b"></span>
+      <span class="lg-blob lg-blob-c"></span><span class="lg-blob lg-blob-d"></span>
     </div>
-    <div class="login-error" id="login-error"></div>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="login-username" placeholder="Enter username" autocomplete="username" onkeydown="if(event.key==='Enter') document.getElementById('login-password').focus()" />
-    </div>
-    <div class="login-field">
-      <label>Password</label>
-      <div class="login-pwd-wrap">
-        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()" />
-        <button type="button" class="login-eye" onclick="toggleLoginPwd()">👁</button>
-      </div>
-    </div>
-    <button class="login-btn" id="login-btn" onclick="doLogin()">Sign In</button>
-    <div class="login-footer">Developed by Itransform Technology</div>
+    <div class="lg-grid"></div>
+    <canvas id="lg-orb"></canvas>
+    <div class="lg-vignette"></div>
   </div>
+
+  <main class="lg-page">
+    <div class="lg-stack">
+
+      <div class="lg-brand">
+        <div class="lg-logo">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <defs><linearGradient id="lg-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#22D3EE"/><stop offset=".5" stop-color="#6C63FF"/><stop offset="1" stop-color="#A855F7"/>
+            </linearGradient></defs>
+            <g fill="none" stroke="url(#lg-grad)" stroke-width="1.6" stroke-linejoin="round">
+              <path d="M6 25V9.5l10 6 10-6V25"/>
+              <path d="M6 9.5 16 3.2l10 6.3" opacity=".75"/>
+              <circle cx="16" cy="15.5" r="2.1" fill="url(#lg-grad)" stroke="none"/>
+              <circle cx="6" cy="25" r="2.1" fill="url(#lg-grad)" stroke="none"/>
+              <circle cx="26" cy="25" r="2.1" fill="url(#lg-grad)" stroke="none"/>
+            </g>
+          </svg>
+        </div>
+        <h1>Itransform Technology</h1>
+        <p>Invoice Management System</p>
+      </div>
+
+      <section class="lg-card" aria-labelledby="lg-title">
+        <span class="lg-glare" aria-hidden="true"></span>
+        <span class="lg-sweep" aria-hidden="true"><i></i></span>
+
+        <div class="lg-head">
+          <h2 id="lg-title">Welcome back</h2>
+          <p>Sign in to continue to your workspace</p>
+        </div>
+
+        <div class="login-error" id="login-error" role="alert" aria-live="assertive"></div>
+
+        <div class="login-field">
+          <label for="login-username">Username</label>
+          <div class="lg-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.6 20.2c0-3.6 3.3-6.4 7.4-6.4s7.4 2.8 7.4 6.4"/></svg>
+            <input type="text" id="login-username" placeholder="Enter username" autocomplete="username"
+                   spellcheck="false" enterkeyhint="next"
+                   onkeydown="if(event.key==='Enter') document.getElementById('login-password').focus()" />
+          </div>
+        </div>
+
+        <div class="login-field">
+          <label for="login-password">Password</label>
+          <div class="lg-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.2"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9"/></svg>
+            <div class="login-pwd-wrap">
+              <input type="password" id="login-password" placeholder="Enter password"
+                     autocomplete="current-password" enterkeyhint="go"
+                     onkeydown="if(event.key==='Enter') doLogin()" />
+              <button type="button" class="login-eye" onclick="toggleLoginPwd()"
+                      aria-label="Show password" aria-controls="login-password">
+                <svg class="lg-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="lg-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16"/><path d="M9.5 6.1A9.9 9.9 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-3 3.8"/><path d="M6.6 8.3A16.8 16.8 0 0 0 2 12s3.6 6.5 10 6.5c1 0 1.9-.15 2.7-.4"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <button class="login-btn" id="login-btn" onclick="doLogin()">Sign In</button>
+
+        <div class="login-footer">Developed by Itransform Technology</div>
+      </section>
+
+    </div>
+  </main>
+
+  <p class="lg-hint" aria-hidden="true">Drag anywhere to orbit</p>
 </div>
 
 <!-- APP SHELL -->
@@ -6119,6 +6393,296 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background
   iDoc.open();iDoc.write(htmlContent);iDoc.close();
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOGIN BACKGROUND — geodesic orb, pointer parallax, and the wiring that
+   makes the scene react to the form.
+
+   This module never touches doLogin(), toggleLoginPwd(), showApp() or
+   doLogout(). It attaches its own listeners alongside the existing inline
+   handlers, so the authentication path is byte-for-byte what it was.
+
+   It also stops itself. The orb's animation frame is cancelled the moment
+   #login-overlay gains the .hidden class, so no canvas loop keeps running
+   behind the application after sign-in.
+   ══════════════════════════════════════════════════════════════════════════ */
+(function loginScene() {
+  var overlay = document.getElementById('login-overlay');
+  var canvas = document.getElementById('lg-orb');
+  if (!overlay || !canvas) return;
+
+  var reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  var fine = matchMedia('(hover: hover) and (pointer: fine)');
+
+  /* ---------------------------------------------------------------- 1. orb
+     An icosahedron subdivided once: 42 vertices, 120 edges, plus three
+     orbit rings and a dust field. Rendered on a 2D canvas, no dependencies. */
+  var Orb = (function () {
+    var ctx = canvas.getContext('2d', { alpha: true });
+    var W = 0, H = 0, dpr = 1, R = 150, glow = null;
+    var small = function () { return innerWidth < 700; };
+    var BASE_SPIN = 0.0018;
+
+    var t = (1 + Math.sqrt(5)) / 2;
+    var verts = [[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],
+                 [0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]];
+    var faces = [[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],
+                 [11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],
+                 [3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+    var mc = {};
+    function mid(a, b) {
+      var k = Math.min(a, b) + ':' + Math.max(a, b);
+      if (mc[k] != null) return mc[k];
+      var p = [(verts[a][0]+verts[b][0])/2, (verts[a][1]+verts[b][1])/2, (verts[a][2]+verts[b][2])/2];
+      verts.push(p); mc[k] = verts.length - 1; return mc[k];
+    }
+    var subdivided = [];
+    faces.forEach(function (f) {
+      var a = mid(f[0], f[1]), b = mid(f[1], f[2]), c = mid(f[2], f[0]);
+      subdivided.push([f[0],a,c], [f[1],b,a], [f[2],c,b], [a,b,c]);
+    });
+    verts = verts.map(function (p) {
+      var m = Math.hypot(p[0], p[1], p[2]) || 1;
+      return [p[0]/m, p[1]/m, p[2]/m];
+    });
+    var seen = {}, edges = [];
+    subdivided.forEach(function (f) {
+      [[f[0],f[1]],[f[1],f[2]],[f[2],f[0]]].forEach(function (e) {
+        var k = Math.min(e[0],e[1]) + ':' + Math.max(e[0],e[1]);
+        if (!seen[k]) { seen[k] = 1; edges.push([e[0], e[1]]); }
+      });
+    });
+
+    var rings = [
+      { tilt: 0.34, yaw: 0.0, r: 1.42 },
+      { tilt: -0.72, yaw: 1.1, r: 1.66 },
+      { tilt: 1.15, yaw: 2.3, r: 1.28 }
+    ];
+    var seed = 90210;
+    function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+    var dust = [];
+    function seedDust() {
+      dust = [];
+      var n = small() ? 34 : 78;
+      for (var i = 0; i < n; i++) {
+        var a = rnd() * Math.PI * 2, z = rnd() * 2 - 1, r = 1.9 + rnd() * 1.5;
+        dust.push([Math.cos(a) * Math.sqrt(1 - z * z) * r, z * r, Math.sin(a) * Math.sqrt(1 - z * z) * r]);
+      }
+    }
+
+    var cam = { yaw: 0.4, pitch: -0.22, spin: BASE_SPIN, aimX: 0, aimY: 0,
+                scale: 1, tScale: 1, gain: 1, tGain: 1, surge: 0, flash: 0 };
+    var dragging = false, lastX = 0, raf = null, pulses = [];
+
+    function resize() {
+      dpr = Math.min(devicePixelRatio || 1, 2);
+      W = overlay.clientWidth; H = overlay.clientHeight;
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      R = Math.min(W, H) * (small() ? 0.30 : 0.24);
+      glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 2.6);
+      glow.addColorStop(0, 'rgba(108,99,255,0.16)');
+      glow.addColorStop(0.5, 'rgba(0,217,255,0.07)');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      seedDust();
+    }
+    addEventListener('resize', resize);
+
+    canvas.addEventListener('pointerdown', function (e) {
+      dragging = true; lastX = e.clientX; canvas.classList.add('is-drag'); start();
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      cam.yaw += (e.clientX - lastX) * 0.006; lastX = e.clientX; start();
+    }, { passive: true });
+    function stopDrag() { dragging = false; canvas.classList.remove('is-drag'); }
+    canvas.addEventListener('pointerup', stopDrag);
+    canvas.addEventListener('pointercancel', stopDrag);
+
+    var FOV = 3.4;
+    function rot(p, sy, cy, sp, cp) {
+      var x = p[0] * cy - p[2] * sy, z = p[0] * sy + p[2] * cy;
+      return [x, p[1] * cp - z * sp, p[1] * sp + z * cp];
+    }
+    function proj(v) {
+      var d = FOV / (FOV - v[2] * 0.55);
+      return [v[0] * R * d, v[1] * R * d, d];
+    }
+
+    function frame() {
+      if (overlay.classList.contains('hidden')) { raf = null; return; }
+      cam.scale += (cam.tScale - cam.scale) * 0.07;
+      cam.gain += (cam.tGain - cam.gain) * 0.07;
+      cam.surge *= 0.94;
+      cam.flash *= 0.93;
+      if (!dragging) cam.yaw += cam.spin + cam.surge * 0.02;
+      cam.pitch += (cam.aimY * 0.22 - 0.22 - cam.pitch) * 0.05;
+
+      var sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+      var sp = Math.sin(cam.pitch), cp = Math.cos(cam.pitch);
+      var cx = W / 2 + cam.aimX * 26, ctr = H / 2 + cam.aimY * 18;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(cx, ctr);
+      ctx.scale(cam.scale, cam.scale);
+
+      ctx.fillStyle = glow; ctx.beginPath();
+      ctx.arc(0, 0, R * 2.6, 0, Math.PI * 2); ctx.fill();
+
+      var pv = verts.map(function (p) { return proj(rot(p, sy, cy, sp, cp)); });
+
+      ctx.lineWidth = 0.7;
+      edges.forEach(function (e) {
+        var a = pv[e[0]], b = pv[e[1]];
+        var depth = (a[2] + b[2]) / 2;
+        var alpha = Math.max(0, (depth - 0.72)) * 0.55 * cam.gain;
+        if (alpha < 0.004) return;
+        ctx.strokeStyle = 'rgba(140,190,255,' + alpha.toFixed(3) + ')';
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      });
+
+      pv.forEach(function (p) {
+        var a = Math.max(0, (p[2] - 0.78)) * 0.9 * cam.gain;
+        if (a < 0.01) return;
+        ctx.fillStyle = 'rgba(190,225,255,' + a.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(p[0], p[1], 1.15 * p[2], 0, Math.PI * 2); ctx.fill();
+      });
+
+      rings.forEach(function (ring, ri) {
+        ctx.beginPath();
+        for (var i = 0; i <= 72; i++) {
+          var a = i / 72 * Math.PI * 2;
+          var p = [Math.cos(a) * ring.r, 0, Math.sin(a) * ring.r];
+          var q = rot([p[0] * Math.cos(ring.yaw) - p[2] * Math.sin(ring.yaw),
+                       p[1] * Math.cos(ring.tilt) - p[2] * Math.sin(ring.tilt),
+                       p[0] * Math.sin(ring.yaw) + p[2] * Math.cos(ring.tilt)], sy, cy, sp, cp);
+          var s = proj(q);
+          if (i === 0) ctx.moveTo(s[0], s[1]); else ctx.lineTo(s[0], s[1]);
+        }
+        ctx.strokeStyle = 'rgba(120,170,255,' + (0.1 * cam.gain).toFixed(3) + ')';
+        ctx.lineWidth = 0.8; ctx.stroke();
+
+        pulses.filter(function (pl) { return pl.ring === ri; }).forEach(function (pl) {
+          var a = pl.t * Math.PI * 2;
+          var p = [Math.cos(a) * ring.r, 0, Math.sin(a) * ring.r];
+          var q = rot([p[0] * Math.cos(ring.yaw) - p[2] * Math.sin(ring.yaw),
+                       p[1] * Math.cos(ring.tilt) - p[2] * Math.sin(ring.tilt),
+                       p[0] * Math.sin(ring.yaw) + p[2] * Math.cos(ring.tilt)], sy, cy, sp, cp);
+          var s = proj(q);
+          ctx.fillStyle = 'rgba(34,211,238,' + Math.max(0, 1 - pl.t).toFixed(2) + ')';
+          ctx.beginPath(); ctx.arc(s[0], s[1], 2.1 * s[2], 0, Math.PI * 2); ctx.fill();
+        });
+      });
+
+      dust.forEach(function (p) {
+        var s = proj(rot(p, sy, cy, sp, cp));
+        var a = Math.max(0, (s[2] - 0.8)) * 0.5 * cam.gain;
+        if (a < 0.01) return;
+        ctx.fillStyle = 'rgba(180,210,255,' + a.toFixed(3) + ')';
+        ctx.fillRect(s[0], s[1], 1.1, 1.1);
+      });
+
+      if (cam.flash > 0.01) {
+        ctx.strokeStyle = 'rgba(52,211,153,' + (cam.flash * 0.5).toFixed(3) + ')';
+        ctx.lineWidth = 2; ctx.beginPath();
+        ctx.arc(0, 0, R * (1.2 + (1.1 - cam.flash)), 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+
+      pulses.forEach(function (pl) { pl.t += pl.v; });
+      pulses = pulses.filter(function (pl) { return pl.t < 1; });
+
+      var settled = !dragging && Math.abs(cam.tScale - cam.scale) < 0.002 &&
+                    Math.abs(cam.tGain - cam.gain) < 0.002;
+      raf = (reduced.matches && settled && !pulses.length) ? null : requestAnimationFrame(frame);
+    }
+    function start() { if (!raf && !overlay.classList.contains('hidden')) raf = requestAnimationFrame(frame); }
+    function stop() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
+
+    resize();
+    document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+    start();
+
+    return {
+      aim: function (x, y) { cam.aimX = x; cam.aimY = y; start(); },
+      recede: function (on) { cam.tScale = on ? 0.88 : 1; cam.tGain = on ? 0.45 : 1; start(); },
+      connect: function () {
+        cam.tScale = 1.12; cam.tGain = 1; cam.surge = 1.6;
+        for (var i = 0; i < 9; i++) {
+          (function (i) {
+            setTimeout(function () { pulses.push({ ring: i % 3, t: 0, v: 0.014 + Math.random() * 0.008 }); }, i * 80);
+          })(i);
+        }
+        start();
+      },
+      connected: function () { cam.flash = 1.1; cam.tScale = 1.02; start(); },
+      reset: function () { cam.tScale = 1; cam.tGain = 1; cam.surge = 0; start(); },
+      stop: stop, start: start, resize: resize
+    };
+  })();
+
+  /* ------------------------------------------------------------ 2. pointer
+     One listener, one frame loop, two custom properties. The blobs, the card
+     tilt and the glare all read --mx/--my from CSS. */
+  if (fine.matches && !reduced.matches) {
+    var tx = 0, ty = 0, px = 0, py = 0, praf = null;
+    overlay.addEventListener('pointermove', function (e) {
+      tx = (e.clientX / innerWidth - 0.5) * 2;
+      ty = (e.clientY / innerHeight - 0.5) * 2;
+      if (!praf) praf = requestAnimationFrame(ploop);
+    }, { passive: true });
+    function ploop() {
+      px += (tx - px) * 0.07; py += (ty - py) * 0.07;
+      overlay.style.setProperty('--mx', px.toFixed(4));
+      overlay.style.setProperty('--my', py.toFixed(4));
+      Orb.aim(px, py);
+      praf = (Math.abs(tx - px) + Math.abs(ty - py) > 0.001) ? requestAnimationFrame(ploop) : null;
+    }
+  }
+
+  /* ------------------------------------------------- 3. form state wiring
+     Added alongside the existing inline handlers, never replacing them. */
+  var user = document.getElementById('login-username');
+  var pass = document.getElementById('login-password');
+  var btn = document.getElementById('login-btn');
+  var eye = overlay.querySelector('.login-eye');
+
+  [user, pass].forEach(function (f) {
+    if (!f) return;
+    f.addEventListener('focus', function () { overlay.classList.add('is-typing'); Orb.recede(true); });
+    f.addEventListener('blur', function () {
+      if (!overlay.querySelector('input:focus')) { overlay.classList.remove('is-typing'); Orb.recede(false); }
+    });
+  });
+
+  /* The eye button keeps calling toggleLoginPwd(); this only mirrors the
+     resulting state onto the icon and the accessible label. */
+  if (eye && pass) {
+    eye.addEventListener('click', function () {
+      var shown = pass.type === 'text';
+      eye.classList.toggle('is-on', shown);
+      eye.setAttribute('aria-label', shown ? 'Hide password' : 'Show password');
+    });
+  }
+
+  /* doLogin() is still the click handler; this fires as well and only drives
+     the animation. */
+  if (btn) btn.addEventListener('click', function () { Orb.connect(); });
+
+  /* showApp() hides the overlay by adding .hidden, doLogout() removes it.
+     Watching that one class is enough to know when to flash and shut down,
+     and when to spin back up, without editing either function. */
+  new MutationObserver(function () {
+    if (overlay.classList.contains('hidden')) {
+      Orb.connected();
+      setTimeout(Orb.stop, 700);
+    } else {
+      Orb.reset(); Orb.resize(); Orb.start();
+    }
+  }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
+})();
 </script>
 </body>
 </html>
