@@ -1489,6 +1489,7 @@
               <select id="cn-gst-type" onchange="recalcCN()">
                 <option value="CGST_SGST">CGST + SGST</option>
                 <option value="IGST">IGST</option>
+                <option value="NO_GST">No GST</option>
               </select>
             </div>
           </div>
@@ -1667,6 +1668,7 @@
               <select id="inv-gst-type" onchange="recalc()">
                 <option value="CGST_SGST">CGST + SGST</option>
                 <option value="IGST">IGST</option>
+                <option value="NO_GST">No GST</option>
               </select>
             </div>
           </div>
@@ -1935,7 +1937,7 @@
       <div class="stat-card" style="border-color:rgba(240,160,64,0.3);"><div class="stat-label">Expiring ≤ 30 Days</div><div class="stat-value" style="color:var(--warn);" id="amc-stat-expiring">0</div><div class="stat-sub">Needs immediate action</div></div>
       <div class="stat-card" style="border-color:rgba(240,96,96,0.3);"><div class="stat-label">Expired</div><div class="stat-value" style="color:var(--danger);" id="amc-stat-expired">0</div><div class="stat-sub">Renewal targets</div></div>
     </div>
-    <div class="card">
+    <div class="card table-scroll-wrap">
       <table>
         <thead><tr>
           <th>Contract #</th>
@@ -1946,7 +1948,7 @@
           <th>AMC Value (₹)</th>
           <th>Status</th>
           <th>Days Left</th>
-          <th></th>
+          <th style="width:90px;"></th>
         </tr></thead>
         <tbody id="amc-body"><tr><td colspan="9" class="loading-row">Loading AMC contracts…</td></tr></tbody>
       </table>
@@ -2063,6 +2065,84 @@
           </div>
         </div>
       </div>
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><div class="card-title">Branding — Logo, Signature &amp; Stamp</div></div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Company Logo</label>
+              <input type="file" id="settings-logo-file" accept="image/*" onchange="onBrandingImageSelected(this,'logo',false)"/>
+              <input type="hidden" id="settings-logo-value"/>
+              <div id="settings-logo-preview" style="margin-top:8px;"></div>
+            </div>
+            <div class="form-group">
+              <label>Authorised Signatory Signature</label>
+              <input type="file" id="settings-signature-file" accept="image/*" onchange="onBrandingImageSelected(this,'signature',true)"/>
+              <input type="hidden" id="settings-signature-value"/>
+              <div id="settings-signature-preview" style="margin-top:8px;"></div>
+            </div>
+            <div class="form-group">
+              <label>Company Stamp / Seal</label>
+              <input type="file" id="settings-stamp-file" accept="image/*" onchange="onBrandingImageSelected(this,'stamp',true)"/>
+              <input type="hidden" id="settings-stamp-value"/>
+              <div id="settings-stamp-preview" style="margin-top:8px;"></div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px;">
+            Signature and Stamp photos have their background automatically removed (based on the color sampled from the photo's corners) so they overlay cleanly on printed invoices and certificates instead of showing as a solid box. For best results, photograph them against one plain, even-colored background.
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;">
+          <button class="btn btn-primary" id="settings-branding-save-btn" onclick="saveBrandingSettings()">Save</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><div class="card-title">Watermark</div></div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Watermark Image</label>
+              <input type="file" id="settings-watermarksrc-file" accept="image/*" onchange="onWatermarkImageSelected(this)"/>
+              <input type="hidden" id="settings-watermarksrc-value"/>
+              <input type="hidden" id="settings-watermark-value"/>
+              <div id="settings-watermarksrc-preview" style="margin-top:8px;"></div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">A separate image from the Logo above — upload whatever you want printed faintly in the background of every Invoice, Challan, Quotation, Credit/Debit Note and Certificate.</div>
+            </div>
+            <div class="form-group">
+              <label>Watermark Style</label>
+              <div style="display:flex;gap:16px;margin-top:6px;">
+                <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+                  <input type="radio" name="settings-watermark-style" value="tilted" checked onchange="onWatermarkStyleChanged('tilted')"/> Tilted
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+                  <input type="radio" name="settings-watermark-style" value="straight" onchange="onWatermarkStyleChanged('straight')"/> Straight
+                </label>
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Tilted prints the watermark at a slight angle (classic "specimen" look); Straight prints it upright, centered.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;">
+          <button class="btn btn-primary" id="settings-watermark-save-btn" onclick="saveWatermarkSettings()">Save</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><div class="card-title">AMC Renewal Reminders</div></div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group full">
+              <label>Google Calendar ID</label>
+              <input type="text" id="settings-calendar-id" placeholder="e.g. yourname@gmail.com, or a Calendar ID from Google Calendar settings"/>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">
+                Create or pick a Google Calendar, share it with this app's Google account (Calendar settings → Share with specific people → Make changes to events), then paste its Calendar ID here. AMC contracts will get a reminder on this calendar automatically, dated on each contract's expiry date.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;">
+          <button class="btn btn-primary" id="settings-calendar-save-btn" onclick="saveCalendarSettings()">Save</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2078,6 +2158,7 @@
     </div>
     <div class="modal-body">
       <input type="hidden" id="amc-edit-row"/>
+      <input type="hidden" id="amc-calendar-event-id"/>
       <div class="form-grid">
         <div class="form-group">
           <label>Contract No. <span style="color:var(--danger);">*</span></label>
@@ -2128,11 +2209,40 @@
           <label>Notes / Remarks</label>
           <textarea id="amc-notes" rows="2" placeholder="Any special terms, scope, or reminders…"></textarea>
         </div>
+        <div class="form-group full">
+          <label>Site Photo</label>
+          <input type="file" id="amc-image-file" accept="image/*" capture="environment" onchange="onAMCImageSelected(this)"/>
+          <input type="hidden" id="amc-image-url"/>
+          <div id="amc-image-preview" style="margin-top:8px;"></div>
+        </div>
+        <div class="form-group full">
+          <label>Location</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="amc-location" placeholder="Address, or click Get My Location" style="flex:1;"/>
+            <button type="button" class="btn" onclick="captureAMCLocation()">Get My Location</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('amc-modal')">Cancel</button>
+      <button class="btn" id="amc-calendar-btn" onclick="syncAmcCalendarNow()" title="Adds/updates a reminder on today's date, regardless of the expiry date.">Add to Calendar</button>
       <button class="btn btn-primary" id="amc-save-btn" onclick="saveAMCContract()">Save Contract</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW AMC CONTRACT — read-only details modal -->
+<div class="modal-overlay" id="amc-view-modal">
+  <div class="modal" style="width:620px;">
+    <div class="modal-header">
+      <div class="modal-title">AMC Contract Details</div>
+      <button class="close-btn" onclick="closeModal('amc-view-modal')"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="modal-body" id="amc-view-body"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('amc-view-modal')">Close</button>
+      <button class="btn btn-primary" onclick="closeModal('amc-view-modal');editAMC(_viewedAMCIdx)">Edit</button>
     </div>
   </div>
 </div>
@@ -2196,6 +2306,8 @@
     <div class="modal-body" id="invoice-view-body"></div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('invoice-view-modal')">Close</button>
+      <button class="btn" onclick="sendInvoiceWhatsapp(_viewedInvoiceData&&_viewedInvoiceData.invoiceNo,_viewedInvoiceData&&_viewedInvoiceData.buyerPhone)">WhatsApp</button>
+      <button class="btn" onclick="sendInvoiceEmailToBuyer(_viewedInvoiceData&&_viewedInvoiceData.invoiceNo,_viewedInvoiceData&&_viewedInvoiceData.buyerEmail)">Email</button>
       <button class="btn btn-success" onclick="printViewedInvoice()">Print / PDF</button>
     </div>
   </div>
@@ -2221,7 +2333,17 @@
 <!-- ══════════════════════════════════════════════════ SCRIPT ══════════════ -->
 <script>
 // ── CONFIG ──────────────────────────────────────────────────────────────────
-const googleScriptUrl = "https://script.google.com/macros/s/AKfycbyZZ7zeVFY0oFj8-_BzPxd6JU2A_5xiAUK5NxJOh8yDmKXi2I5VnwHagPb50zkYC7ga/exec";
+const googleScriptUrl = "https://script.google.com/macros/s/AKfycbybPlBSl9apAW-nNoh54hts369qnuQF7XAUM_HRAWg8C3_JAuN4-9DHxzO4kl_97t1F/exec";
+
+// Sent with every login attempt so validateLoginSecret() on the backend can
+// reject requests that never went through this app's own login form (e.g.
+// a bot hitting checkLogin blindly). NOTE: this file is public — anyone can
+// view-source and read this value, so it is NOT a real secret and must
+// never be treated as one. Its only value is filtering out automated/blind
+// login attempts that never fetched this page at all; it adds nothing
+// against a targeted attacker. Must match the API_SECRET Script Property
+// on the backend exactly, or login will always fail.
+const LOGIN_SECRET = "f221bbb2b7cde1221b660b06173627c7edbbf3e17184c645";
 
 // COMPANY is populated entirely from the server (Tenant record in GScript) —
 // on login (doLogin) and on session-restore (init) via loadCompanyInfo().
@@ -2230,11 +2352,25 @@ const googleScriptUrl = "https://script.google.com/macros/s/AKfycbyZZ7zeVFY0oFj8
 let COMPANY = {
   name:'', address:'', gstin:'', state:'', stateCode:'',
   phone:'', email:'', website:'', bank:'',
-  acctName:'', acctNo:'', ifsc:'', upi:''
+  acctName:'', acctNo:'', ifsc:'', upi:'', pan:'', logo:'', signature:'', calendarId:'', stamp:'', watermark:'',
+  watermarkSrc:'', watermarkStyle:'tilted'
 };
 
 function escapeHtml(text){return String(text==null?'':text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function safeHtml(value){return escapeHtml(value);}
+// For a value spliced into onclick="doThing('${v}')"-style inline handlers.
+// Two different breakout risks stack here: a raw ' ends the JS string early
+// (letting arbitrary JS run inside the handler), and a raw " ends the HTML
+// attribute early (letting a whole new attribute/event-handler be injected).
+// HTML-entity-decoding of attribute values happens BEFORE the browser parses
+// the decoded text as the onclick handler's JS, so a backslash-escaped quote
+// (\') is what has to survive to reach the JS parser — escaping ' as an
+// HTML entity instead would just decode back to a raw ' first and defeat
+// the point. Backslashes are escaped first so an existing backslash in the
+// data can't interfere with the escapes this function itself adds.
+function escapeForInlineHandler(v){
+  return String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 let invState = {
@@ -2284,8 +2420,10 @@ async function doLogin(){
   if(!username||!password){errBox.textContent='Please enter both username and password.';errBox.style.display='block';return;}
   btn.disabled=true;btn.textContent='Signing in…';
   try{
-    const url=googleScriptUrl+'?action=checkLogin&username='+encodeURIComponent(username)+'&password='+encodeURIComponent(password);
-    const res=await fetch(url); const data=await res.json();
+    // POST with credentials in the body — never GET/query-string, which
+    // browsers/proxies can log or cache in plaintext.
+    const res=await fetch(googleScriptUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'checkLogin',username,password,secret:LOGIN_SECRET})});
+    const data=await res.json();
     if(data.success){
       sessionStorage.setItem('gme_token',data.token); sessionStorage.setItem('gme_username',data.username);
       sessionStorage.setItem('gme_display',data.displayName||data.username);
@@ -2314,6 +2452,269 @@ function applyCompanyToUI(){
   Object.keys(map).forEach(id=>{const el=document.getElementById(id); if(el) el.value=map[id]||'';});
   const addr=document.getElementById('settings-address'); if(addr) addr.value=COMPANY.address||'';
   const state=document.getElementById('settings-state'); if(state) state.value=COMPANY.state?(COMPANY.state+(COMPANY.stateCode?' (Code: '+COMPANY.stateCode+')':'')):'';
+  const calId=document.getElementById('settings-calendar-id'); if(calId) calId.value=COMPANY.calendarId||'';
+  ['logo','signature','stamp'].forEach(field=>{
+    const val=COMPANY[field]||'';
+    const valInput=document.getElementById('settings-'+field+'-value'); if(valInput) valInput.value=val;
+    renderBrandingPreview(field, val);
+  });
+  const wmInput=document.getElementById('settings-watermark-value'); if(wmInput) wmInput.value=COMPANY.watermark||'';
+  const wmSrcInput=document.getElementById('settings-watermarksrc-value');
+  if(wmSrcInput){ wmSrcInput.value=COMPANY.watermarkSrc||''; renderBrandingPreview('watermarksrc', COMPANY.watermarkSrc||''); }
+  const style=COMPANY.watermarkStyle||'tilted';
+  const styleRadio=document.querySelector('input[name="settings-watermark-style"][value="'+style+'"]');
+  if(styleRadio) styleRadio.checked=true;
+}
+
+// Shows the currently-saved (or just-uploaded) image for a branding field,
+// framed on a white swatch so a transparent signature/stamp previews the
+// same way it'll actually look sitting on a white invoice — this app's own
+// theme is dark, which would otherwise make that hard to judge.
+function renderBrandingPreview(field, dataUrl){
+  const el=document.getElementById('settings-'+field+'-preview');
+  if(!el) return;
+  el.innerHTML=dataUrl
+    ? `<div style="display:inline-block;background:#fff;padding:6px;border-radius:8px;"><img src="${dataUrl}" style="max-width:120px;max-height:80px;display:block;"></div>`
+    : '';
+}
+
+function saveCalendarSettings(){
+  const calendarId=(document.getElementById('settings-calendar-id').value||'').trim();
+  const btn=document.getElementById('settings-calendar-save-btn');
+  btn.disabled=true; btn.textContent='Saving…';
+  gasPostAMC('saveCompanySettings',{data:{
+    pan:COMPANY.pan||'', logo:COMPANY.logo||'', signature:COMPANY.signature||'',
+    stamp:COMPANY.stamp||'', watermark:COMPANY.watermark||'', calendarId
+  }}).then(d=>{
+    btn.disabled=false; btn.textContent='Save';
+    if(d.success){
+      COMPANY.calendarId=calendarId;
+      sessionStorage.setItem('gme_company',JSON.stringify(COMPANY));
+      showToast('Calendar settings saved.','success');
+    } else {
+      showToast(d.message||'Save failed.','error');
+    }
+  }).catch(()=>{
+    btn.disabled=false; btn.textContent='Save';
+    showToast('Save failed — check connection.','error');
+  });
+}
+
+// ── BRANDING (Logo / Signature / Stamp) ─────────────────────────────────────
+// Removes a photo's background by sampling the average color of its four
+// corners and making close-matching pixels transparent — safe to assume for
+// a signature (ink on a plain page) or a stamp (art on one flat color), but
+// NOT applied to Logo, which may legitimately be a multi-color image where
+// the corners aren't "background" at all.
+// darkenFactor (0..1) scales down the RGB of every non-background pixel —
+// baked into the stored PNG once here, rather than a CSS filter applied at
+// render time, since the same processed image is reused as-is by the
+// browser print engine AND the server-side (Google Drive) PDF renderer for
+// WhatsApp/Email — a render-time filter would need separate support in both
+// places and Drive's HTML-to-PDF converter isn't confirmed to honor it.
+function chromaKeyToTransparentPng(img, threshold, darkenFactor){
+  const canvas=document.createElement('canvas');
+  canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(img,0,0);
+  const frame=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d=frame.data, w=canvas.width, h=canvas.height;
+  const corners=[0, (w-1)*4, (h-1)*w*4, ((h-1)*w+(w-1))*4];
+  let br=0,bg=0,bb=0;
+  corners.forEach(i=>{ br+=d[i]; bg+=d[i+1]; bb+=d[i+2]; });
+  br/=4; bg/=4; bb/=4;
+  const keep=1-(darkenFactor||0);
+  for(let i=0;i<d.length;i+=4){
+    const dr=d[i]-br, dg=d[i+1]-bg, db=d[i+2]-bb;
+    if(Math.sqrt(dr*dr+dg*dg+db*db)<threshold){ d[i+3]=0; continue; }
+    if(darkenFactor){ d[i]*=keep; d[i+1]*=keep; d[i+2]*=keep; }
+  }
+  ctx.putImageData(frame,0,0);
+  return canvas.toDataURL('image/png');
+}
+
+// Builds a faint, optionally-rotated watermark from the tenant's own
+// uploaded watermark image (a separate upload from Logo) — baked into the
+// PNG's own pixels ONCE here (rotation via canvas + a fixed alpha per
+// pixel), rather than a live CSS transform/opacity applied at print time.
+// That's deliberate: this same processed image is later embedded as a
+// plain background-image by BOTH the browser print engine and the
+// server-side (Google Drive) PDF renderer for WhatsApp/Email, and Drive's
+// HTML-to-PDF converter has already shown it doesn't reliably handle
+// position:absolute + transform (see LedgerPrintGas's header comment) —
+// a live rotation there risks the same stray-line/broken-border bug. Baking
+// the rotation into pixels means both renderers just need a plain, safe
+// background-image with no transform at all. angleDeg=0 (the "Straight"
+// style) still goes through this same rotate step — trivially, since
+// rotating by 0 is a no-op — so both styles share one code path.
+// The canvas is sized to the rotated image's full bounding box (not the
+// original width/height) so corners don't get clipped off by the rotation.
+function makeWatermarkImage(img, angleDeg, opacity){
+  const rad=angleDeg*Math.PI/180;
+  const w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+  const cos=Math.abs(Math.cos(rad)), sin=Math.abs(Math.sin(rad));
+  const bw=Math.ceil(w*cos+h*sin), bh=Math.ceil(w*sin+h*cos);
+  const canvas=document.createElement('canvas');
+  canvas.width=bw; canvas.height=bh;
+  const ctx=canvas.getContext('2d');
+  ctx.translate(bw/2, bh/2);
+  ctx.rotate(rad);
+  ctx.globalAlpha=opacity;
+  ctx.drawImage(img, -w/2, -h/2, w, h);
+  return canvas.toDataURL('image/png');
+}
+
+// Downscales (long side capped) and re-encodes so a phone-camera photo
+// doesn't bloat the sheet cell it ends up stored in.
+function loadAndResizeImage(dataUrl, maxDim){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width, h=img.height;
+      if(w>maxDim||h>maxDim){ const scale=maxDim/Math.max(w,h); w=Math.round(w*scale); h=Math.round(h*scale); }
+      const canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const resizedImg=new Image();
+      resizedImg.onload=()=>resolve(resizedImg);
+      resizedImg.src=canvas.toDataURL('image/png');
+    };
+    img.onerror=reject;
+    img.src=dataUrl;
+  });
+}
+
+function onBrandingImageSelected(input, field, removeBg){
+  const file=input.files&&input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    loadAndResizeImage(e.target.result, 500).then(img=>{
+      // Stamp ink often photographs faded/light — darken it a bit so it
+      // reads clearly once printed; signatures are already dark ink, so
+      // they're left untouched.
+      const darkenFactor = field==='stamp' ? 0.3 : 0;
+      const out=removeBg ? chromaKeyToTransparentPng(img, 60, darkenFactor) : img.src;
+      document.getElementById('settings-'+field+'-value').value=out;
+      renderBrandingPreview(field, out);
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveBrandingSettings(){
+  const logo=document.getElementById('settings-logo-value').value||'';
+  const signature=document.getElementById('settings-signature-value').value||'';
+  const stamp=document.getElementById('settings-stamp-value').value||'';
+  const btn=document.getElementById('settings-branding-save-btn');
+  btn.disabled=true; btn.textContent='Saving…';
+  // Watermark has its own Save button/card now — pass the existing value
+  // through unchanged so this save doesn't clobber it.
+  gasPostAMC('saveCompanySettings',{data:{
+    pan:COMPANY.pan||'', logo, signature, stamp, watermark:COMPANY.watermark||'',
+    watermarkSrc:COMPANY.watermarkSrc||'', watermarkStyle:COMPANY.watermarkStyle||'tilted',
+    calendarId:COMPANY.calendarId||''
+  }}).then(d=>{
+    btn.disabled=false; btn.textContent='Save';
+    if(d.success){
+      // Adopt the short Drive links the backend actually stored — not the
+      // raw base64 this function sent — so sessionStorage (and the next
+      // page load) hold the same short link the sheet cell has, not a
+      // multi-hundred-KB data URI.
+      const saved=d.company||{};
+      COMPANY.logo=saved.logo||''; COMPANY.signature=saved.signature||''; COMPANY.stamp=saved.stamp||'';
+      document.getElementById('settings-logo-value').value=COMPANY.logo;
+      document.getElementById('settings-signature-value').value=COMPANY.signature;
+      document.getElementById('settings-stamp-value').value=COMPANY.stamp;
+      sessionStorage.setItem('gme_company',JSON.stringify(COMPANY));
+      showToast('Branding saved.','success');
+    } else {
+      showToast(d.message||'Save failed.','error');
+    }
+  }).catch(()=>{
+    btn.disabled=false; btn.textContent='Save';
+    showToast('Save failed — check connection.','error');
+  });
+}
+
+// ── WATERMARK (separate image from Logo, with a tilted/straight style choice) ─
+// The uploaded image is kept in its raw, unprocessed form (settings-
+// watermarksrc-value) specifically so switching Tilted <-> Straight can
+// recompute cleanly from the original photo instead of re-rotating an
+// already-rotated/faded copy (which would compound the fade and, for a
+// tilt->straight switch, leave the image sitting crooked with no way back).
+const WATERMARK_ANGLES = { tilted: -22, straight: 0 };
+const WATERMARK_OPACITY = 0.07;
+
+function onWatermarkImageSelected(input){
+  const file=input.files&&input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    loadAndResizeImage(e.target.result, 700).then(img=>{
+      document.getElementById('settings-watermarksrc-value').value=img.src;
+      renderBrandingPreview('watermarksrc', img.src);
+      regenerateWatermarkFromSrc();
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+function onWatermarkStyleChanged(style){
+  regenerateWatermarkFromSrc();
+}
+
+function getSelectedWatermarkStyle(){
+  const checked=document.querySelector('input[name="settings-watermark-style"]:checked');
+  return (checked&&checked.value)||'tilted';
+}
+
+// Recomputes settings-watermark-value (the actual final image every print
+// engine uses) from settings-watermarksrc-value (the raw upload) plus
+// whichever style radio is currently selected. Safe to call any time either
+// one changes; a no-op if nothing has been uploaded yet.
+function regenerateWatermarkFromSrc(){
+  const srcVal=document.getElementById('settings-watermarksrc-value').value||'';
+  if(!srcVal) return;
+  const style=getSelectedWatermarkStyle();
+  const angle=WATERMARK_ANGLES[style]!=null?WATERMARK_ANGLES[style]:WATERMARK_ANGLES.tilted;
+  const img=new Image();
+  img.onload=()=>{
+    document.getElementById('settings-watermark-value').value=makeWatermarkImage(img, angle, WATERMARK_OPACITY);
+  };
+  img.src=srcVal;
+}
+
+function saveWatermarkSettings(){
+  const watermarkSrc=document.getElementById('settings-watermarksrc-value').value||'';
+  const watermark=document.getElementById('settings-watermark-value').value||'';
+  const watermarkStyle=getSelectedWatermarkStyle();
+  const btn=document.getElementById('settings-watermark-save-btn');
+  btn.disabled=true; btn.textContent='Saving…';
+  // Pass every other branding field through unchanged — this save must not
+  // clobber Logo/Signature/Stamp/PAN/Calendar, same reasoning as
+  // saveCalendarSettings().
+  gasPostAMC('saveCompanySettings',{data:{
+    pan:COMPANY.pan||'', logo:COMPANY.logo||'', signature:COMPANY.signature||'',
+    stamp:COMPANY.stamp||'', calendarId:COMPANY.calendarId||'',
+    watermarkSrc, watermarkStyle, watermark
+  }}).then(d=>{
+    btn.disabled=false; btn.textContent='Save';
+    if(d.success){
+      const saved=d.company||{};
+      COMPANY.watermarkSrc=saved.watermarkSrc||''; COMPANY.watermarkStyle=saved.watermarkStyle||'tilted';
+      COMPANY.watermark=saved.watermark||'';
+      document.getElementById('settings-watermarksrc-value').value=COMPANY.watermarkSrc;
+      document.getElementById('settings-watermark-value').value=COMPANY.watermark;
+      sessionStorage.setItem('gme_company',JSON.stringify(COMPANY));
+      showToast('Watermark saved.','success');
+    } else {
+      showToast(d.message||'Save failed.','error');
+    }
+  }).catch(()=>{
+    btn.disabled=false; btn.textContent='Save';
+    showToast('Save failed — check connection.','error');
+  });
 }
 
 // Fetches the tenant's company/bank details fresh from the server —
@@ -2345,6 +2746,16 @@ function showApp(displayName){
 }
 
 function doLogout(){
+  // Best-effort server-side session revocation — fire-and-forget so the UI
+  // never waits on it (and still logs the user out locally if offline).
+  // Without this, "logout" only forgot the token client-side; the session
+  // row stayed valid server-side until its TTL ran out.
+  const token=sessionStorage.getItem('gme_token');
+  if(token){
+    try{
+      fetch(googleScriptUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'logout',token})}).catch(()=>{});
+    }catch(e){}
+  }
   sessionStorage.clear();
   ['login-username','login-password'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('login-error').style.display='none';
@@ -2492,8 +2903,8 @@ async function loadDashboard(){
       const recent=[...liveInvoices].reverse().slice(0,5);
       document.getElementById('recent-invoices-body').innerHTML=recent.map(inv=>`
         <tr>
-          <td style="font-weight:600;color:var(--accent)">${inv['Invoice No']||'-'}</td>
-          <td>${inv['Buyer Name']||'-'}</td>
+          <td style="font-weight:600;color:var(--accent)">${escapeHtml(inv['Invoice No'])||'-'}</td>
+          <td>${escapeHtml(inv['Buyer Name'])||'-'}</td>
           <td>${fmtDate(inv['Date'])}</td>
           <td style="font-weight:600">₹${parseFloat(inv['Grand Total']||0).toLocaleString('en-IN')}</td>
           <td>₹${parseFloat(inv['Tax Amount']||0).toLocaleString('en-IN')}</td>
@@ -2533,11 +2944,13 @@ function renderInvoicesTable(data){
     return;
   }
   document.getElementById('invoices-body').innerHTML=[...data].reverse().map(inv=>{
-    const no=(inv['Invoice No']||'').replace(/'/g,"\\'");
+    const no=escapeForInlineHandler(inv['Invoice No']);
+    const phone=escapeForInlineHandler(inv['Buyer Phone']);
+    const email=escapeForInlineHandler(inv['Buyer Email']);
     return`
     <tr>
-      <td style="font-weight:600;color:var(--accent)">${inv['Invoice No']||'-'}</td>
-      <td>${inv['Buyer Name']||'-'}</td>
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(inv['Invoice No'])||'-'}</td>
+      <td>${escapeHtml(inv['Buyer Name'])||'-'}</td>
       <td class="hide-mobile">${fmtDate(inv['Date'])}</td>
       <td style="font-weight:600">₹${parseFloat(inv['Grand Total']||0).toLocaleString('en-IN')}</td>
       <td class="hide-mobile">₹${parseFloat(inv['Tax Amount']||0).toLocaleString('en-IN')}</td>
@@ -2545,6 +2958,8 @@ function renderInvoicesTable(data){
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="viewInvoice('${no}')">View</button>
         <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="editInvoice('${no}')">Edit</button>
         <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="reprintInvoice('${no}')">Reprint</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="sendInvoiceWhatsapp('${no}','${phone}')">WhatsApp</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="sendInvoiceEmailToBuyer('${no}','${email}')">Email</button>
       </td>
     </tr>`;}).join('');
 }
@@ -2576,12 +2991,12 @@ function renderCustomersTable(customers){
   }
   document.getElementById('customers-body').innerHTML=customers.map(c=>`
     <tr>
-      <td style="font-weight:600">${c['Name']||c.name||'-'}</td>
-      <td style="font-family:monospace;font-size:12px;">${c['GSTIN']||c.gstin||'-'}</td>
-      <td>${c['Phone']||c.phone||'-'}</td>
-      <td style="color:var(--info);">${c['Email']||c.email||'-'}</td>
-      <td>${c['State']||c.state||'-'}</td>
-      <td style="font-size:11px;color:var(--text3);">${c['Timestamp']||c.timestamp||'-'}</td>
+      <td style="font-weight:600">${escapeHtml(c['Name']||c.name)||'-'}</td>
+      <td style="font-family:monospace;font-size:12px;">${escapeHtml(c['GSTIN']||c.gstin)||'-'}</td>
+      <td>${escapeHtml(c['Phone']||c.phone)||'-'}</td>
+      <td style="color:var(--info);">${escapeHtml(c['Email']||c.email)||'-'}</td>
+      <td>${escapeHtml(c['State']||c.state)||'-'}</td>
+      <td style="font-size:11px;color:var(--text3);">${escapeHtml(c['Timestamp']||c.timestamp)||'-'}</td>
     </tr>`).join('');
 }
 
@@ -2650,13 +3065,13 @@ function renderItemsTable(items){
   }
   document.getElementById('items-body').innerHTML=items.map(it=>`
     <tr>
-      <td style="font-weight:600">${it['Name']||it.name||'-'}</td>
-      <td><span class="badge ${(it['Type']||it.type||'')==='Service'?'sent':'draft'}">${it['Type']||it.type||'-'}</span></td>
-      <td style="font-family:monospace;font-size:12px;">${it['HSN']||it.hsn||'-'}</td>
-      <td>${it['Unit']||it.unit||'-'}</td>
+      <td style="font-weight:600">${escapeHtml(it['Name']||it.name)||'-'}</td>
+      <td><span class="badge ${(it['Type']||it.type||'')==='Service'?'sent':'draft'}">${escapeHtml(it['Type']||it.type)||'-'}</span></td>
+      <td style="font-family:monospace;font-size:12px;">${escapeHtml(it['HSN']||it.hsn)||'-'}</td>
+      <td>${escapeHtml(it['Unit']||it.unit)||'-'}</td>
       <td style="font-weight:600">₹${parseFloat(it['Rate']||it.rate||0).toLocaleString('en-IN')}</td>
-      <td>${it['GST']||it.gst||0}%</td>
-      <td style="font-size:11px;color:var(--text3);">${it['Timestamp']||it.timestamp||'-'}</td>
+      <td>${escapeHtml(it['GST']||it.gst||0)}%</td>
+      <td style="font-size:11px;color:var(--text3);">${escapeHtml(it['Timestamp']||it.timestamp)||'-'}</td>
     </tr>`).join('');
 }
 
@@ -2746,8 +3161,8 @@ function showReport(type){
 
     html=`<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
       ${[...rows].slice(0,-1).map(r=>`<tr>
-        <td style="font-weight:600;color:var(--accent)">${r[0]}</td>
-        <td>${r[1]}</td><td>${r[2]}</td>
+        <td style="font-weight:600;color:var(--accent)">${escapeHtml(r[0])}</td>
+        <td>${escapeHtml(r[1])}</td><td>${r[2]}</td>
         <td>₹${parseFloat(r[3]).toLocaleString('en-IN')}</td>
         <td>₹${parseFloat(r[4]).toLocaleString('en-IN')}</td>
         <td style="font-weight:600">₹${parseFloat(r[5]).toLocaleString('en-IN')}</td>
@@ -2782,8 +3197,8 @@ function showReport(type){
 
     html=`<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
       ${[...rows].slice(0,-1).map(r=>`<tr>
-        <td style="font-weight:600;color:var(--accent)">${r[0]}</td>
-        <td>${r[1]}</td><td>${r[2]}</td>
+        <td style="font-weight:600;color:var(--accent)">${escapeHtml(r[0])}</td>
+        <td>${escapeHtml(r[1])}</td><td>${r[2]}</td>
         <td>₹${parseFloat(r[3]).toLocaleString('en-IN')}</td>
         <td>₹${parseFloat(r[4]).toLocaleString('en-IN')}</td>
         <td>₹${parseFloat(r[5]).toLocaleString('en-IN')}</td>
@@ -2821,7 +3236,7 @@ function showReport(type){
 
     html=`<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
       ${sorted.map(([n,v])=>`<tr>
-        <td style="font-weight:600">${n}</td>
+        <td style="font-weight:600">${escapeHtml(n)}</td>
         <td style="text-align:center;">${v.count}</td>
         <td>₹${v.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
         <td>₹${v.tax.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
@@ -3039,10 +3454,13 @@ function recalc(){
   const gstType=document.getElementById('inv-gst-type')?.value||'CGST_SGST';
   let cgstAmt=0,sgstAmt=0,igstAmt=0;
   if(gstType==='IGST'){igstAmt=sub*(invState.taxes.igst/100);}
-  else{cgstAmt=sub*(invState.taxes.cgst/100);sgstAmt=sub*(invState.taxes.sgst/100);}
+  else if(gstType!=='NO_GST'){cgstAmt=sub*(invState.taxes.cgst/100);sgstAmt=sub*(invState.taxes.sgst/100);}
   const grand=Math.round(sub+cgstAmt+sgstAmt+igstAmt);
   document.getElementById('modal-subtotal').textContent='₹'+sub.toFixed(2);
-  if(gstType==='IGST'){
+  if(gstType==='NO_GST'){
+    document.getElementById('modal-cgst-row').style.display='none';document.getElementById('modal-sgst-row').style.display='none';
+    document.getElementById('modal-igst-row').style.display='none';
+  }else if(gstType==='IGST'){
     document.getElementById('modal-cgst-row').style.display='none';document.getElementById('modal-sgst-row').style.display='none';
     document.getElementById('modal-igst-row').style.display='';
     document.getElementById('modal-igst-label').textContent=`IGST (${invState.taxes.igst}%)`;
@@ -3066,10 +3484,15 @@ function recalc(){
 function getComputedTotals(){
   const sub=invState.lineItems.reduce((a,i)=>a+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
   const gstType=document.getElementById('inv-gst-type')?.value||'CGST_SGST';
-  let cgstAmt=0,sgstAmt=0,igstAmt=0;
-  if(gstType==='IGST'){igstAmt=sub*(invState.taxes.igst/100);}
-  else{cgstAmt=sub*(invState.taxes.cgst/100);sgstAmt=sub*(invState.taxes.sgst/100);}
-  return{subTotal:sub,cgstAmt,sgstAmt,igstAmt,grandTotal:Math.round(sub+cgstAmt+sgstAmt+igstAmt)};
+  let cgstAmt=0,sgstAmt=0,igstAmt=0,cgstRate=0,sgstRate=0,igstRate=0;
+  if(gstType==='NO_GST'){
+    // Rates stay 0 (not invState.taxes.*) so a saved/printed No-GST bill
+    // never shows a stale "@ 9%" label next to a ₹0.00 amount — switching
+    // back to CGST+SGST/IGST later still has the originally-configured
+    // rates, since invState.taxes itself is left untouched.
+  }else if(gstType==='IGST'){igstAmt=sub*(invState.taxes.igst/100);igstRate=invState.taxes.igst;}
+  else{cgstAmt=sub*(invState.taxes.cgst/100);sgstAmt=sub*(invState.taxes.sgst/100);cgstRate=invState.taxes.cgst;sgstRate=invState.taxes.sgst;}
+  return{subTotal:sub,cgstAmt,sgstAmt,igstAmt,cgstRate,sgstRate,igstRate,grandTotal:Math.round(sub+cgstAmt+sgstAmt+igstAmt)};
 }
 
 // ── BUYER SEARCH (GAS) ────────────────────────────────────────────────────────
@@ -3080,8 +3503,8 @@ function renderBuyerDropdown(matches){
   if(!matches.length){closeBuyerDropdown();return;}
   box.innerHTML=matches.map((b,i)=>`
     <div class="buyer-option" data-idx="${i}">
-      <div class="buyer-option-name">${b.name||b.Name||''}</div>
-      <div class="buyer-option-sub">${b.address||b.Address||''}${(b.gstin||b.GSTIN)?' · '+(b.gstin||b.GSTIN):''}</div>
+      <div class="buyer-option-name">${escapeHtml(b.name||b.Name||'')}</div>
+      <div class="buyer-option-sub">${escapeHtml(b.address||b.Address||'')}${(b.gstin||b.GSTIN)?' · '+escapeHtml(b.gstin||b.GSTIN):''}</div>
     </div>`).join('');
   box.style.display='block';
   box.querySelectorAll('.buyer-option').forEach(el=>{
@@ -3144,7 +3567,11 @@ async function handleSaveToSheets(){
   const hBtn=document.getElementById('header-save-btn');
   if(btn){btn.disabled=true;btn.textContent='Saving…';}
   if(hBtn){hBtn.disabled=true;hBtn.textContent='Saving…';}
-  const cleanItems=invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:parseFloat(item.gstPct)||0,amount:parseFloat(item.amount)||0}));
+  // No-GST: force every line's own gstPct to 0 too — otherwise the itemized
+  // HSN-wise tax table would still show each item's originally-configured
+  // rate (e.g. 18%) even though the doc-level totals show ₹0.00 tax.
+  const _invNoGst=document.getElementById('inv-gst-type')?.value==='NO_GST';
+  const cleanItems=invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:_invNoGst?0:(parseFloat(item.gstPct)||0),amount:parseFloat(item.amount)||0}));
   const payload={
     action:'addInvoice',
     token:sessionStorage.getItem('gme_token')||'',
@@ -3155,9 +3582,9 @@ async function handleSaveToSheets(){
       buyerName:invState.buyer.name, buyerPhone:invState.buyer.phone||'', buyerEmail:invState.buyer.email||'',
       buyerAddress:invState.buyer.address||'', buyerGstin:invState.buyer.gstin||'',
       buyerState:invState.buyer.state||'Maharashtra', stateCode:invState.buyer.stateCode||'27',
-      subTotal:totals.subTotal, cgstRate:invState.taxes.cgst, cgstAmount:totals.cgstAmt,
-      sgstRate:invState.taxes.sgst, sgstAmount:totals.sgstAmt,
-      igstRate:invState.taxes.igst, igstAmount:totals.igstAmt,
+      subTotal:totals.subTotal, cgstRate:totals.cgstRate, cgstAmount:totals.cgstAmt,
+      sgstRate:totals.sgstRate, sgstAmount:totals.sgstAmt,
+      igstRate:totals.igstRate, igstAmount:totals.igstAmt,
       taxAmount:totals.cgstAmt+totals.sgstAmt+totals.igstAmt, grandTotal:totals.grandTotal,
       items:cleanItems
     }
@@ -3193,7 +3620,11 @@ async function handleUpdateInvoiceToSheets(){
   const hLbl=document.getElementById('header-save-btn-label');
   if(btn)btn.disabled=true; if(hBtn)hBtn.disabled=true;
   if(pLbl)pLbl.textContent='Updating…'; if(hLbl)hLbl.textContent='Updating…';
-  const cleanItems=invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:parseFloat(item.gstPct)||0,amount:parseFloat(item.amount)||0}));
+  // No-GST: force every line's own gstPct to 0 too — otherwise the itemized
+  // HSN-wise tax table would still show each item's originally-configured
+  // rate (e.g. 18%) even though the doc-level totals show ₹0.00 tax.
+  const _invNoGst=document.getElementById('inv-gst-type')?.value==='NO_GST';
+  const cleanItems=invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:_invNoGst?0:(parseFloat(item.gstPct)||0),amount:parseFloat(item.amount)||0}));
   const payload={
     action:'updateInvoice',
     token:sessionStorage.getItem('gme_token')||'',
@@ -3205,9 +3636,9 @@ async function handleUpdateInvoiceToSheets(){
       buyerName:invState.buyer.name, buyerPhone:invState.buyer.phone||'', buyerEmail:invState.buyer.email||'',
       buyerAddress:invState.buyer.address||'', buyerGstin:invState.buyer.gstin||'',
       buyerState:invState.buyer.state||'Maharashtra', stateCode:invState.buyer.stateCode||'27',
-      subTotal:totals.subTotal, cgstRate:invState.taxes.cgst, cgstAmount:totals.cgstAmt,
-      sgstRate:invState.taxes.sgst, sgstAmount:totals.sgstAmt,
-      igstRate:invState.taxes.igst, igstAmount:totals.igstAmt,
+      subTotal:totals.subTotal, cgstRate:totals.cgstRate, cgstAmount:totals.cgstAmt,
+      sgstRate:totals.sgstRate, sgstAmount:totals.sgstAmt,
+      igstRate:totals.igstRate, igstAmount:totals.igstAmt,
       taxAmount:totals.cgstAmt+totals.sgstAmt+totals.igstAmt, grandTotal:totals.grandTotal,
       items:cleanItems
     }
@@ -3241,7 +3672,7 @@ function handlePrint(){
     buyerName:invState.buyer.name, buyerAddress:invState.buyer.address, buyerGstin:invState.buyer.gstin,
     buyerState:invState.buyer.state, stateCode:invState.buyer.stateCode||'27',
     buyerPhone:invState.buyer.phone, buyerEmail:invState.buyer.email,
-    subTotal:t.subTotal, cgstRate:invState.taxes.cgst, sgstRate:invState.taxes.sgst, igstRate:invState.taxes.igst,
+    subTotal:t.subTotal, cgstRate:t.cgstRate, sgstRate:t.sgstRate, igstRate:t.igstRate,
     cgstAmount:t.cgstAmt, sgstAmount:t.sgstAmt, igstAmount:t.igstAmt, grandTotal:t.grandTotal,
     items:invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:item.qty,rate:item.rate,unit:item.unit||'Nos',amount:(parseFloat(item.qty)||0)*(parseFloat(item.rate)||0)}))
   });
@@ -3300,19 +3731,19 @@ async function viewInvoice(invoiceNo){
       grandTotal:inv['Grand Total'], items
     };
     const cgstAmt=parseFloat(inv['CGST Amount']||0), sgstAmt=parseFloat(inv['SGST Amount']||0), igstAmt=parseFloat(inv['IGST Amount']||0);
-    const itemsRowsHtml=items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.desc||''}</td><td>${it.hsn||''}</td><td style="text-align:right;">${it.qty}</td><td style="text-align:right;">₹${parseFloat(it.rate||0).toFixed(2)}</td><td>${it.unit||'Nos'}</td><td style="text-align:right;font-weight:600;">₹${parseFloat(it.amount||0).toLocaleString('en-IN')}</td></tr>`).join('');
+    const itemsRowsHtml=items.map((it,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(it.desc||'')}</td><td>${escapeHtml(it.hsn||'')}</td><td style="text-align:right;">${escapeHtml(it.qty)}</td><td style="text-align:right;">₹${parseFloat(it.rate||0).toFixed(2)}</td><td>${escapeHtml(it.unit||'Nos')}</td><td style="text-align:right;font-weight:600;">₹${parseFloat(it.amount||0).toLocaleString('en-IN')}</td></tr>`).join('');
     document.getElementById('invoice-view-body').innerHTML=`
       <div class="form-grid" style="margin-bottom:16px;">
-        <div><div style="font-size:11px;color:var(--text3);">Invoice No.</div><div style="font-weight:600;">${inv['Invoice No']||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Invoice No.</div><div style="font-weight:600;">${escapeHtml(inv['Invoice No'])||'-'}</div></div>
         <div><div style="font-size:11px;color:var(--text3);">Date</div><div style="font-weight:600;">${fmtDate(inv['Date'])}</div></div>
-        <div><div style="font-size:11px;color:var(--text3);">Challan No.</div><div style="font-weight:600;">${inv['Challan No']||'-'}</div></div>
-        <div><div style="font-size:11px;color:var(--text3);">Saved By</div><div style="font-weight:600;">${inv['Saved By']||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Challan No.</div><div style="font-weight:600;">${escapeHtml(inv['Challan No'])||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Saved By</div><div style="font-weight:600;">${escapeHtml(inv['Saved By'])||'-'}</div></div>
       </div>
       <div style="margin-bottom:16px;">
         <div style="font-size:11px;color:var(--text3);text-transform:uppercase;">Buyer (Bill To)</div>
-        <div style="font-weight:600;">${inv['Buyer Name']||'-'}</div>
-        <div style="font-size:13px;color:var(--text2);white-space:pre-line;">${inv['Buyer Address']||'-'}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px;">GSTIN: ${inv['Buyer GSTIN']||'Unregistered'}${inv['Buyer Phone']?' · Ph: '+inv['Buyer Phone']:''}${inv['Buyer Email']?' · '+inv['Buyer Email']:''}</div>
+        <div style="font-weight:600;">${escapeHtml(inv['Buyer Name'])||'-'}</div>
+        <div style="font-size:13px;color:var(--text2);white-space:pre-line;">${escapeHtml(inv['Buyer Address'])||'-'}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px;">GSTIN: ${escapeHtml(inv['Buyer GSTIN'])||'Unregistered'}${inv['Buyer Phone']?' · Ph: '+escapeHtml(inv['Buyer Phone']):''}${inv['Buyer Email']?' · '+escapeHtml(inv['Buyer Email']):''}</div>
       </div>
       <table class="items-table">
         <thead><tr><th>#</th><th>Description</th><th>HSN</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th>Unit</th><th style="text-align:right;">Amount</th></tr></thead>
@@ -3321,8 +3752,8 @@ async function viewInvoice(invoiceNo){
       <div style="display:flex;justify-content:flex-end;margin-top:16px;">
         <div class="summary-box" style="min-width:280px;">
           <div class="summary-row"><span>Subtotal</span><span>₹${parseFloat(inv['Sub Total']||0).toLocaleString('en-IN')}</span></div>
-          ${cgstAmt>0?`<div class="summary-row"><span>CGST (${inv['CGST Rate']}%)</span><span>₹${cgstAmt.toFixed(2)}</span></div><div class="summary-row"><span>SGST (${inv['SGST Rate']}%)</span><span>₹${sgstAmt.toFixed(2)}</span></div>`:''}
-          ${igstAmt>0?`<div class="summary-row"><span>IGST (${inv['IGST Rate']}%)</span><span>₹${igstAmt.toFixed(2)}</span></div>`:''}
+          ${cgstAmt>0?`<div class="summary-row"><span>CGST (${escapeHtml(inv['CGST Rate'])}%)</span><span>₹${cgstAmt.toFixed(2)}</span></div><div class="summary-row"><span>SGST (${escapeHtml(inv['SGST Rate'])}%)</span><span>₹${sgstAmt.toFixed(2)}</span></div>`:''}
+          ${igstAmt>0?`<div class="summary-row"><span>IGST (${escapeHtml(inv['IGST Rate'])}%)</span><span>₹${igstAmt.toFixed(2)}</span></div>`:''}
           <div class="summary-row total"><span>Grand Total</span><span>₹${parseFloat(inv['Grand Total']||0).toLocaleString('en-IN')}</span></div>
         </div>
       </div>`;
@@ -3330,6 +3761,42 @@ async function viewInvoice(invoiceNo){
   }catch(e){showToast('Failed to load invoice.','error');}
 }
 function printViewedInvoice(){ if(_viewedInvoiceData) printInvoiceHtml(_viewedInvoiceData); }
+
+// ── BUYER-FACING SEND — WhatsApp click-to-chat + direct email ────────────────
+// Both hit the backend to (re)build the invoice PDF; WhatsApp gets a Drive
+// share-link baked into a pre-filled wa.me message, Email attaches the PDF
+// straight to the buyer's inbox. Distinct from the automatic seller-copy
+// email that already fires on every invoice save.
+
+function sendInvoiceWhatsapp(invoiceNo, buyerPhone){
+  // Sheet-backed fields can come back as numbers (e.g. a phone cell Sheets
+  // auto-typed as numeric) — coerce to String() before any .replace()/.trim(),
+  // which Numbers don't have.
+  invoiceNo=String(invoiceNo||'').trim();
+  buyerPhone=String(buyerPhone||'');
+  if(!invoiceNo){ showToast('Invoice number missing.','error'); return; }
+  const digits=buyerPhone.replace(/[^\d]/g,'');
+  if(!digits){ showToast('No buyer phone on file for this invoice.','error'); return; }
+  showToast('Preparing invoice PDF…');
+  gasPostAMC('getInvoiceWhatsappLink',{invoiceNo}).then(d=>{
+    if(!d.success){ showToast(d.message||'Could not prepare WhatsApp message.','error'); return; }
+    const waDigits=String(d.phone||buyerPhone||'').replace(/[^\d]/g,'');
+    const waPhone=waDigits.length===10?'91'+waDigits:waDigits;
+    const text=`Hi ${d.buyerName||''}, please find your invoice ${invoiceNo} here: ${d.pdfUrl}`;
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`,'_blank');
+  }).catch(()=>showToast('Failed to prepare WhatsApp message — check connection.','error'));
+}
+
+function sendInvoiceEmailToBuyer(invoiceNo, buyerEmail){
+  invoiceNo=String(invoiceNo||'').trim();
+  buyerEmail=String(buyerEmail||'').trim();
+  if(!invoiceNo){ showToast('Invoice number missing.','error'); return; }
+  if(!buyerEmail){ showToast('No buyer email on file for this invoice.','error'); return; }
+  showToast('Sending invoice email…');
+  gasPostAMC('sendInvoiceToBuyer',{invoiceNo}).then(d=>{
+    showToast(d.message||(d.success?'Invoice emailed.':'Email failed.'), d.success?'success':'error');
+  }).catch(()=>showToast('Failed to send email — check connection.','error'));
+}
 
 // ── EDIT INVOICE — loads a saved invoice into the New Invoice page for editing ─
 async function editInvoice(invoiceNo){
@@ -3361,7 +3828,7 @@ async function editInvoice(invoiceNo){
     document.getElementById('inv-no').value=invState.invoiceMeta.invoiceNo;
     document.getElementById('inv-date').value=invState.invoiceMeta.date;
     document.getElementById('inv-challan').value=invState.invoiceMeta.challanNo;
-    document.getElementById('inv-gst-type').value=igstRate>0?'IGST':'CGST_SGST';
+    document.getElementById('inv-gst-type').value=(!cgstRate&&!sgstRate&&!igstRate)?'NO_GST':(igstRate>0?'IGST':'CGST_SGST');
     document.getElementById('buyer-name').value=invState.buyer.name;
     document.getElementById('buyer-address').value=invState.buyer.address;
     document.getElementById('buyer-gstin').value=invState.buyer.gstin;
@@ -3631,6 +4098,16 @@ var LedgerPrint = (function () {
       invoiceRate = 0;
     }
 
+    // A genuinely tax-exempt invoice (GST Type = No GST) is a materially
+    // different document from a "Tax Invoice" — swap the header title
+    // rather than print one titled "Tax Invoice" that charges no tax.
+    // DOC is reassigned to a fresh copy here (not mutated in place), so
+    // this can't leak into DOCS.invoice itself for a later document built
+    // in the same page session.
+    if (kind === 'invoice' && cgst === 0 && sgst === 0 && igst === 0) {
+      DOC = Object.assign({}, DOC, { title: 'Non-tax invoice' });
+    }
+
     var raw = data.items || [];
     var lines = raw.map(function (it, i) {
       var qty = num(it.qty), rate = num(it.rate);
@@ -3666,7 +4143,10 @@ var LedgerPrint = (function () {
         name: company.name || '', address: company.address || '',
         gstin: company.gstin || '', state: company.state || '',
         stateCode: company.stateCode || '', phone: company.phone || '',
-        email: company.email || '', website: company.website || ''
+        email: company.email || '', website: company.website || '',
+        pan: company.pan || '', logo: company.logo || '',
+        signature: company.signature || '', stamp: company.stamp || '',
+        watermark: company.watermark || ''
       },
       bank: {
         accountName: company.acctName || company.name || '',
@@ -3835,6 +4315,7 @@ var LedgerPrint = (function () {
     }
     var addr = String(s.address || '').split(/\r?\n/).map(esc).join('<br>');
     return '<div class="inv-seller" style="height:' + GEO.sellerH + 'mm">' +
+      (s.logo ? '<div class="logo"><img src="' + s.logo + '"></div>' : '') +
       '<div class="who"><h2>' + esc(s.name) + '</h2><p>' + addr + '</p></div>' +
       '<div class="ids">' + id('GSTIN', s.gstin) + id('PAN', s.pan) + id('Phone', s.phone) +
       id('Email', s.email) + id('Web', s.website) + '</div></div>';
@@ -3885,14 +4366,20 @@ var LedgerPrint = (function () {
   }
 
   function partiesBlock(inv) {
+    // Invoices don't show a Ship To column at all — Bill To's flex-grow
+    // absorbs the freed width automatically (see .inv-parties .bill in
+    // PAGE_STYLE). Challan/Quotation/Credit-Debit Note are unaffected.
+    var showShip = inv.kind !== 'invoice';
     var sh = inv.shipTo && inv.shipTo.name ? inv.shipTo : inv.customer;
     return '<div class="inv-parties" style="height:' + GEO.partiesH + 'mm">' +
       '<div class="bill"><span class="lbl">Bill to</span>' +
         '<div class="party-name">' + esc(inv.customer.name) + '</div>' +
         '<div class="party-lines">' + partyLines(inv.customer) + '</div></div>' +
-      '<div class="ship"><span class="lbl">Ship to</span>' +
-        '<div class="party-name">' + esc(sh.name || inv.customer.name) + '</div>' +
-        '<div class="party-lines">' + partyLines(sh) + '</div></div>' +
+      (showShip
+        ? '<div class="ship"><span class="lbl">Ship to</span>' +
+          '<div class="party-name">' + esc(sh.name || inv.customer.name) + '</div>' +
+          '<div class="party-lines">' + partyLines(sh) + '</div></div>'
+        : '') +
       '<div class="meta"><table>' + metaRows(inv) + '</table></div></div>';
   }
 
@@ -3969,7 +4456,9 @@ var LedgerPrint = (function () {
     function row(k, v, cls) {
       return '<tr class="' + (cls || '') + '"><td>' + esc(k) + '</td><td>' + v + '</td></tr>';
     }
-    var taxRows = inv.intra
+    // No-GST bills (cgst/sgst/igst all zero) skip the tax row entirely
+    // instead of printing a misleading "IGST: ₹0.00" line.
+    var taxRows = (!inv.cgst && !inv.sgst && !inv.igst) ? '' : inv.intra
       ? row('CGST' + (inv.cgstRate ? ' @ ' + fmtNum(inv.cgstRate) + '%' : ''), fmtCur(inv.cgst)) +
         row('SGST' + (inv.sgstRate ? ' @ ' + fmtNum(inv.sgstRate) + '%' : ''), fmtCur(inv.sgst))
       : row('IGST' + (inv.igstRate ? ' @ ' + fmtNum(inv.igstRate) + '%' : ''), fmtCur(inv.igst));
@@ -4008,9 +4497,29 @@ var LedgerPrint = (function () {
           '<span class="lbl">Total amount in words</span><br><b>' + esc(inv.words) + '</b></div>'
       : '<div class="inv-words" style="height:' + GEO.wordsH + 'mm">' +
           '<span class="lbl">Notes</span><br><b>' + esc(inv.meta.notes || '-') + '</b></div>';
+    // Signature layered directly over the stamp (both centered on the same
+    // point via absolute positioning — safe here since this is rendered by
+    // a real browser, not Drive's HTML-to-PDF converter), so they blend
+    // into one mark the way a real signature crossing a stamp would.
+    // Sizes capped to fit the "sign" column's real budget (bankH 22mm minus
+    // padding and the "For X"/"Authorised signatory" text lines above and
+    // below) — the old 16mm wrapper overran that, and with .inv-page/
+    // .inv-bank both overflow:hidden, "Authorised signatory" got clipped.
+    var sigStampHtml = '';
+    if (inv.seller.stamp && inv.seller.signature) {
+      sigStampHtml = '<div style="position:relative;width:26mm;height:11mm;">' +
+        '<img src="' + inv.seller.stamp + '" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-height:11mm;max-width:11mm;z-index:1;">' +
+        '<img src="' + inv.seller.signature + '" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-height:9mm;max-width:26mm;z-index:2;">' +
+        '</div>';
+    } else if (inv.seller.stamp || inv.seller.signature) {
+      sigStampHtml = '<img src="' + (inv.seller.stamp || inv.seller.signature) + '" style="max-height:12mm;max-width:30mm;">';
+    }
+    // The receiver-signs case (challan) deliberately gets no stamp/signature
+    // — that blank box is for the person receiving goods to sign, not a
+    // pre-filled company seal.
     var signCell = inv.doc.money
       ? '<div class="sign"><div>For ' + esc(inv.seller.name) + '</div>' +
-          '<div class="img"></div><div>Authorised signatory</div></div>'
+          '<div class="img">' + sigStampHtml + '</div><div>Authorised signatory</div></div>'
       : '<div class="sign"><div>Received in good condition</div>' +
           '<div class="img"></div><div>Receiver signature with date</div></div>';
     return wordsBand +
@@ -4085,7 +4594,15 @@ var LedgerPrint = (function () {
         '<span>Page ' + page.number + ' of ' + totalPages + '</span>' +
         '<span>' + esc(DOC.foot) + '</span></div>';
 
-    return '<section class="inv-page" style="height:' + GEO.pageH + 'mm;--row-h:' + GEO.rowH + 'mm">' +
+    // Baked-in-pixels watermark (see makeWatermarkImage above) — a plain
+    // background-image, no live CSS transform/opacity, so the same markup
+    // renders identically whether a real browser or Google Drive's
+    // HTML-to-PDF converter is doing the rendering.
+    var wmStyle = inv.seller.watermark
+      ? ';background-image:url(\'' + inv.seller.watermark + '\');background-repeat:no-repeat;' +
+        'background-position:center center;background-size:65% auto;'
+      : '';
+    return '<section class="inv-page" style="height:' + GEO.pageH + 'mm;--row-h:' + GEO.rowH + 'mm' + wmStyle + '">' +
       head + table + foot + '</section>';
   }
 
@@ -4107,7 +4624,7 @@ var LedgerPrint = (function () {
       'unless agreed in writing.' + j;
   }
 
-  var PAGE_STYLE = "@page{size:A4 portrait;margin:8mm}\nhtml,body{margin:0;padding:0;background:#fff}\n*{box-sizing:border-box}\n.inv-page{margin:0 auto;break-after:page;page-break-after:always}\n.inv-page:last-child{break-after:auto;page-break-after:auto}\n.inv-page,.inv-page *{-webkit-print-color-adjust:exact;print-color-adjust:exact}\ntr,td,th,.inv-items,.inv-foot{break-inside:avoid;page-break-inside:avoid}\n\n.inv-page{\n  width:194mm;background:#fff;color:#000;box-sizing:border-box;\n  position:relative;display:flex;flex-direction:column;overflow:hidden;\n  font-family:Arial,Helvetica,\"Liberation Sans\",sans-serif;\n  font-size:8pt;line-height:1.22;\n  border:.4mm solid #000;\n}\n.inv-page *{box-sizing:border-box}\n.inv-page .r{text-align:right}\n.inv-page .c{text-align:center}\n.inv-page .n{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}\n.inv-page .lbl{font-size:6.4pt;letter-spacing:.05em;text-transform:uppercase;color:#333}\n.inv-page .bold{font-weight:700}\n\n.inv-title{\n  display:flex;align-items:center;justify-content:space-between;gap:4mm;\n  padding:0 2mm;border-bottom:.35mm solid #000;flex:0 0 auto;\n}\n.inv-title h1{font-size:11pt;letter-spacing:.16em;text-transform:uppercase;font-weight:700}\n.inv-title .copy{font-size:6.6pt;text-transform:uppercase;letter-spacing:.08em}\n\n.inv-seller{display:flex;gap:3mm;padding:1.6mm 2mm;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-seller .logo{width:22mm;flex:0 0 22mm;display:flex;align-items:center;justify-content:center}\n.inv-seller .logo img{max-width:22mm;max-height:16mm;object-fit:contain}\n.inv-seller .who{flex:1;min-width:0}\n.inv-seller .who h2{font-size:12pt;font-weight:700;letter-spacing:.01em;line-height:1.1}\n.inv-seller .who p{margin:.6mm 0 0;font-size:7.4pt;line-height:1.3}\n.inv-seller .ids{flex:0 0 62mm;font-size:7.2pt}\n.inv-seller .ids div{display:flex;justify-content:space-between;gap:2mm;border-bottom:.2mm dotted #999;padding:.35mm 0}\n\n.inv-parties{display:flex;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-parties > div{padding:1.4mm 2mm;overflow:hidden}\n.inv-parties .bill{flex:1 1 34%;border-right:.35mm solid #000}\n.inv-parties .ship{flex:1 1 30%;border-right:.35mm solid #000}\n.inv-parties .meta{flex:0 0 62mm;padding:0}\n.inv-parties .party-name{font-size:8.6pt;font-weight:700;margin:.6mm 0}\n.inv-parties .party-lines{font-size:7.3pt;line-height:1.32}\n.inv-parties .meta table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:6.9pt}\n.inv-parties .meta td{\n  padding:0 2mm;border-bottom:.2mm solid #bbb;line-height:3mm;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\n}\n.inv-parties .meta td:first-child{color:#333;width:42%}\n.inv-parties .meta tr:last-child td{border-bottom:0}\n\n.inv-strip{display:flex;justify-content:space-between;gap:3mm;padding:0 2mm;\n  border-bottom:.35mm solid #000;font-size:7.2pt;align-items:center;flex:0 0 auto}\n.inv-strip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n\n.inv-carry{\n  display:flex;align-items:center;justify-content:space-between;gap:3mm;padding:0 2mm;\n  border-bottom:.35mm solid #000;font-size:7.4pt;flex:0 0 auto;overflow:hidden;\n}\n.inv-carry .bold{font-size:8.4pt}\n\n.inv-empty{\n  display:flex;align-items:center;justify-content:center;flex:0 0 auto;\n  border-bottom:.35mm solid #000;font-size:7.4pt;color:#444;overflow:hidden;\n}\n\n.inv-items{flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden;\n  border-bottom:.35mm solid #000}\n.inv-items table{width:100%;border-collapse:collapse;table-layout:fixed}\n.inv-items th{\n  border-bottom:.35mm solid #000;border-right:.2mm solid #000;\n  font-size:6.8pt;text-transform:uppercase;letter-spacing:.03em;font-weight:700;\n  padding:0 1.2mm;overflow:hidden;\n}\n.inv-items td{\n  border-right:.2mm solid #000;padding:0 1.2mm;\n  font-size:7.5pt;vertical-align:top;overflow:hidden;\n  line-height:var(--row-h,4.8mm);\n}\n.inv-items th:last-child,.inv-items td:last-child{border-right:0}\n.inv-items .desc{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;\n  overflow-wrap:break-word;word-break:normal;hyphens:none}\n.inv-items tr.filler td{border-bottom:0}\n.inv-items tr.carry td{border-top:.3mm solid #000;font-weight:700;font-size:7.4pt}\n\n.inv-foot{flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden}\n.inv-tax{border-bottom:.35mm solid #000;overflow:hidden;flex:0 0 auto}\n.inv-tax table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:7pt}\n.inv-tax th,.inv-tax td{border-right:.2mm solid #000;border-bottom:.2mm solid #999;padding:0 1.2mm;overflow:hidden}\n.inv-tax th{font-size:6.5pt;text-transform:uppercase;font-weight:700;border-bottom:.3mm solid #000}\n.inv-tax th:last-child,.inv-tax td:last-child{border-right:0}\n.inv-tax tfoot td{font-weight:700;border-top:.3mm solid #000;border-bottom:0}\n\n.inv-totals{display:flex;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-totals .note{flex:1;padding:1.2mm 2mm;font-size:7pt;line-height:1.35;border-right:.35mm solid #000}\n.inv-totals .sums{flex:0 0 76mm}\n.inv-totals table{width:100%;border-collapse:collapse;font-size:7.6pt}\n.inv-totals td{padding:.5mm 2mm;border-bottom:.2mm solid #bbb}\n.inv-totals td:last-child{text-align:right;font-variant-numeric:tabular-nums;width:38mm}\n.inv-totals tr.grand td{font-size:9.4pt;font-weight:700;border-top:.35mm solid #000;border-bottom:0}\n\n.inv-words{padding:1.1mm 2mm;border-bottom:.35mm solid #000;font-size:7.6pt;flex:0 0 auto;overflow:hidden}\n.inv-words b{font-size:8pt}\n\n.inv-bank{display:flex;flex:0 0 auto;overflow:hidden}\n.inv-bank .bank{flex:1;padding:1.2mm 2mm;border-right:.35mm solid #000;font-size:7.2pt}\n.inv-bank .bank table{border-collapse:collapse;width:100%;max-width:80mm}\n.inv-bank .bank td{padding:.3mm 0;font-size:7.2pt}\n.inv-bank .bank td:first-child{color:#333;width:26mm}\n.inv-bank .terms{flex:1;padding:1.2mm 2mm;border-right:.35mm solid #000;font-size:6.8pt;line-height:1.3}\n.inv-bank .sign{flex:0 0 58mm;padding:1.2mm 2mm;display:flex;flex-direction:column;\n  justify-content:space-between;text-align:center;font-size:7.4pt}\n.inv-bank .sign .img{flex:1;display:flex;align-items:center;justify-content:center;padding:.6mm 0}\n.inv-bank .sign .img img{max-height:14mm;max-width:44mm;object-fit:contain}\n\n.inv-pagefoot{display:flex;justify-content:space-between;padding:0 2mm;\n  border-top:.35mm solid #000;font-size:6.6pt;align-items:center;flex:0 0 auto}\n";
+  var PAGE_STYLE = "@page{size:A4 portrait;margin:8mm}\nhtml,body{margin:0;padding:0;background:#fff}\n*{box-sizing:border-box}\n.inv-page{margin:0 auto;break-after:page;page-break-after:always}\n.inv-page:last-child{break-after:auto;page-break-after:auto}\n.inv-page,.inv-page *{-webkit-print-color-adjust:exact;print-color-adjust:exact}\ntr,td,th,.inv-items,.inv-foot{break-inside:avoid;page-break-inside:avoid}\n\n.inv-page{\n  width:194mm;background:#fff;color:#000;box-sizing:border-box;\n  position:relative;display:flex;flex-direction:column;overflow:hidden;\n  font-family:Arial,Helvetica,\"Liberation Sans\",sans-serif;\n  font-size:8pt;line-height:1.22;\n  border:.4mm solid #000;\n}\n.inv-page *{box-sizing:border-box}\n.inv-page .r{text-align:right}\n.inv-page .c{text-align:center}\n.inv-page .n{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}\n.inv-page .lbl{font-size:6.4pt;letter-spacing:.05em;text-transform:uppercase;color:#333}\n.inv-page .bold{font-weight:700}\n\n.inv-title{\n  display:flex;align-items:center;justify-content:space-between;gap:4mm;\n  padding:0 2mm;border-bottom:.35mm solid #000;flex:0 0 auto;\n}\n.inv-title h1{font-size:11pt;letter-spacing:.16em;text-transform:uppercase;font-weight:700}\n.inv-title .copy{font-size:6.6pt;text-transform:uppercase;letter-spacing:.08em}\n\n.inv-seller{display:flex;gap:3mm;padding:1.6mm 2mm;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-seller .logo{width:22mm;flex:0 0 22mm;display:flex;align-items:center;justify-content:center}\n.inv-seller .logo img{max-width:22mm;max-height:16mm;object-fit:contain}\n.inv-seller .who{flex:1;min-width:0}\n.inv-seller .who h2{font-size:12pt;font-weight:700;letter-spacing:.01em;line-height:1.1}\n.inv-seller .who p{margin:.6mm 0 0;font-size:7.4pt;line-height:1.3}\n.inv-seller .ids{flex:0 0 62mm;font-size:7.2pt}\n.inv-seller .ids div{display:flex;justify-content:space-between;gap:2mm;border-bottom:.2mm dotted #999;padding:.35mm 0}\n\n.inv-parties{display:flex;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-parties > div{padding:1.4mm 2mm;overflow:hidden}\n.inv-parties .bill{flex:1 1 34%;border-right:.35mm solid #000}\n.inv-parties .ship{flex:1 1 30%;border-right:.35mm solid #000}\n.inv-parties .meta{flex:0 0 62mm;padding:0}\n.inv-parties .party-name{font-size:8.6pt;font-weight:700;margin:.6mm 0}\n.inv-parties .party-lines{font-size:7.3pt;line-height:1.32}\n.inv-parties .meta table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:6.9pt}\n.inv-parties .meta td{\n  padding:0 2mm;border-bottom:.2mm solid #bbb;line-height:3mm;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\n}\n.inv-parties .meta td:first-child{color:#333;width:42%}\n.inv-parties .meta tr:last-child td{border-bottom:0}\n\n.inv-strip{display:flex;justify-content:space-between;gap:3mm;padding:0 2mm;\n  border-bottom:.35mm solid #000;font-size:7.2pt;align-items:center;flex:0 0 auto}\n.inv-strip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n\n.inv-carry{\n  display:flex;align-items:center;justify-content:space-between;gap:3mm;padding:0 2mm;\n  border-bottom:.35mm solid #000;font-size:7.4pt;flex:0 0 auto;overflow:hidden;\n}\n.inv-carry .bold{font-size:8.4pt}\n\n.inv-empty{\n  display:flex;align-items:center;justify-content:center;flex:0 0 auto;\n  border-bottom:.35mm solid #000;font-size:7.4pt;color:#444;overflow:hidden;\n}\n\n.inv-items{flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden;\n  border-bottom:.35mm solid #000}\n.inv-items table{width:100%;border-collapse:collapse;table-layout:fixed}\n.inv-items th{\n  border-bottom:.35mm solid #000;border-right:.2mm solid #000;\n  font-size:6.8pt;text-transform:uppercase;letter-spacing:.03em;font-weight:700;\n  padding:0 1.2mm;overflow:hidden;\n}\n.inv-items td{\n  border-right:.2mm solid #000;padding:0 1.2mm;\n  font-size:7.5pt;vertical-align:top;overflow:hidden;\n  line-height:var(--row-h,4.8mm);\n}\n.inv-items th:last-child,.inv-items td:last-child{border-right:0}\n.inv-items .desc{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;\n  overflow-wrap:break-word;word-break:normal;hyphens:none}\n.inv-items tr.filler td{border-bottom:0}\n.inv-items tr.carry td{border-top:.3mm solid #000;font-weight:700;font-size:7.4pt}\n\n.inv-foot{flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden}\n.inv-tax{border-bottom:.35mm solid #000;overflow:hidden;flex:0 0 auto}\n.inv-tax table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:7pt}\n.inv-tax th,.inv-tax td{border-right:.2mm solid #000;border-bottom:.2mm solid #999;padding:0 1.2mm;overflow:hidden}\n.inv-tax th{font-size:6.5pt;text-transform:uppercase;font-weight:700;border-bottom:.3mm solid #000}\n.inv-tax th:last-child,.inv-tax td:last-child{border-right:0}\n.inv-tax tfoot td{font-weight:700;border-top:.3mm solid #000;border-bottom:0}\n\n.inv-totals{display:flex;border-bottom:.35mm solid #000;flex:0 0 auto;overflow:hidden}\n.inv-totals .note{flex:1;padding:1.2mm 2mm;font-size:7pt;line-height:1.35;border-right:.35mm solid #000}\n.inv-totals .sums{flex:0 0 76mm}\n.inv-totals table{width:100%;border-collapse:collapse;font-size:7.6pt}\n.inv-totals td{padding:.5mm 2mm;border-bottom:.2mm solid #bbb}\n.inv-totals td:last-child{text-align:right;font-variant-numeric:tabular-nums;width:38mm}\n.inv-totals tr.grand td{font-size:9.4pt;font-weight:700;border-top:.35mm solid #000;border-bottom:0}\n\n.inv-words{padding:1.1mm 2mm;border-bottom:.35mm solid #000;font-size:7.6pt;flex:0 0 auto;overflow:hidden}\n.inv-words b{font-size:8pt}\n\n.inv-bank{display:flex;flex:0 0 auto;overflow:hidden}\n.inv-bank .bank{flex:1;padding:1.2mm 2mm;border-right:.35mm solid #000;font-size:7.2pt}\n.inv-bank .bank table{border-collapse:collapse;width:100%;max-width:80mm}\n.inv-bank .bank td{padding:.3mm 0;font-size:7.2pt}\n.inv-bank .bank td:first-child{color:#333;width:26mm}\n.inv-bank .terms{flex:1;padding:1.2mm 2mm;border-right:.35mm solid #000;font-size:6.8pt;line-height:1.3}\n.inv-bank .sign{flex:0 0 58mm;padding:1.2mm 2mm;display:flex;flex-direction:column;\n  justify-content:space-between;text-align:center;font-size:7.4pt}\n.inv-bank .sign .img{flex:1;display:flex;align-items:center;justify-content:center;padding:.6mm 0}\n.inv-bank .sign .img img{max-height:12mm;max-width:30mm;object-fit:contain}\n\n.inv-pagefoot{display:flex;justify-content:space-between;padding:0 2mm;\n  border-top:.35mm solid #000;font-size:6.6pt;align-items:center;flex:0 0 auto}\n";
 
   /* ---- public API ------------------------------------------------------- */
   function buildPagesHtml(data, company, kind) {
@@ -4151,10 +4668,38 @@ var LedgerPrint = (function () {
       win.document.write(built.document);
       win.document.close();
       var go = function () {
-        setTimeout(function () { win.focus(); win.print(); resolve(built); }, 250);
+        // Logo/Signature/Stamp are now Drive-hosted URLs, not inline data —
+        // they need an actual network fetch, unlike everything else in this
+        // self-contained document. A fixed short delay isn't enough on a
+        // slower connection: print() would fire before they arrive, so the
+        // first attempt comes out missing them (a retry then "works"
+        // because the browser has since cached them). Wait for every image
+        // to actually finish loading instead of guessing a delay.
+        waitForImagesToLoad(win.document, 4000).then(function () {
+          win.focus(); win.print(); resolve(built);
+        });
       };
       if (win.document.readyState === 'complete') go();
       else win.addEventListener('load', go);
+    });
+  }
+
+  // Resolves once every <img> in `doc` has finished loading (or errored —
+  // a broken image link must never hang the print flow forever), capped at
+  // maxWaitMs as a safety net in case something never settles.
+  function waitForImagesToLoad(doc, maxWaitMs) {
+    return new Promise(function (resolve) {
+      var imgs = Array.prototype.slice.call(doc.images || []);
+      if (!imgs.length) { resolve(); return; }
+      var pending = imgs.length, settled = false;
+      function settle() { if (!settled) { settled = true; resolve(); } }
+      function onOne() { pending--; if (pending <= 0) settle(); }
+      imgs.forEach(function (img) {
+        if (img.complete) { onOne(); return; }
+        img.addEventListener('load', onOne, { once: true });
+        img.addEventListener('error', onOne, { once: true });
+      });
+      setTimeout(settle, maxWaitMs);
     });
   }
 
@@ -4164,7 +4709,8 @@ var LedgerPrint = (function () {
     printDocument: function (kind, data, company) { return print(data, company, kind); },
     buildInvoice: buildInvoice, buildDoc: buildDoc, paginateItems: paginateItems,
     calculatePageCapacity: calculatePageCapacity, numberToIndianWords: numberToIndianWords,
-    textWidthMM: textWidthMM, wrappedLineCount: wrappedLineCount, rowUnitsFor: rowUnitsFor
+    textWidthMM: textWidthMM, wrappedLineCount: wrappedLineCount, rowUnitsFor: rowUnitsFor,
+    waitForImagesToLoad: waitForImagesToLoad
   };
 })();
 
@@ -4340,7 +4886,7 @@ async function onChallanBuyerChange(val){
   const local=invState.savedBuyers.filter(b=>(b.name||b.Name||'').toLowerCase().includes(query.toLowerCase()));
   if(local.length){
     const box=document.getElementById('ch-buyer-dropdown');
-    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name||b.Name||''}</div><div class="buyer-option-sub">${b.address||b.Address||''}</div></div>`).join('');
+    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name||b.Name||'')}</div><div class="buyer-option-sub">${escapeHtml(b.address||b.Address||'')}</div></div>`).join('');
     box.style.display='block';
     box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateChallanBuyerFields(local[parseInt(el.dataset.idx)]);closeChallanBuyerDropdown();showToast('Buyer loaded','success');});});
   }
@@ -4354,7 +4900,7 @@ async function onChallanBuyerChange(val){
         const norm=data.buyers.map(b=>({name:b.name||b.Name||'',address:b.address||b.Address||'',gstin:b.gstin||b.GSTIN||'',state:b.state||b.State||'Maharashtra',phone:b.phone||b.Phone||'',email:b.email||b.Email||''}));
         norm.forEach(b=>{const idx=invState.savedBuyers.findIndex(x=>(x.name||x.Name)===b.name);if(idx>=0)invState.savedBuyers[idx]=b;else invState.savedBuyers.push(b);});
         const box=document.getElementById('ch-buyer-dropdown');
-        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name}</div><div class="buyer-option-sub">${b.address}${b.gstin?' · '+b.gstin:''}</div></div>`).join('');
+        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name)}</div><div class="buyer-option-sub">${escapeHtml(b.address)}${b.gstin?' · '+escapeHtml(b.gstin):''}</div></div>`).join('');
         box.style.display='block';
         box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateChallanBuyerFields(norm[parseInt(el.dataset.idx)]);closeChallanBuyerDropdown();showToast('Buyer loaded','success');});});
       }
@@ -4503,12 +5049,12 @@ function renderChallansTable(challans){
   }
   document.getElementById('challans-body').innerHTML=[...challans].reverse().map(ch=>{
     let items=[];try{items=JSON.parse(ch['Items (JSON)']||'[]');}catch(e){}
-    const no=(ch['Challan No']||'').replace(/'/g,"\\'");
+    const no=escapeForInlineHandler(ch['Challan No']);
     return`<tr>
-      <td style="font-weight:600;color:var(--accent)">${ch['Challan No']||'-'}</td>
-      <td>${ch['Buyer Name']||'-'}</td>
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(ch['Challan No'])||'-'}</td>
+      <td>${escapeHtml(ch['Buyer Name'])||'-'}</td>
       <td class="hide-mobile">${fmtDate(ch['Date'])}</td>
-      <td class="hide-mobile" style="font-size:12px;color:var(--text3);">${ch['Ref Invoice No']||'-'}</td>
+      <td class="hide-mobile" style="font-size:12px;color:var(--text3);">${escapeHtml(ch['Ref Invoice No'])||'-'}</td>
       <td class="hide-mobile" style="font-size:12px;">${items.length} item(s)</td>
       <td style="white-space:nowrap;">
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="viewChallan('${no}')">View</button>
@@ -4583,25 +5129,25 @@ async function viewChallan(challanNo){
       buyerGstin:ch['Buyer GSTIN'],buyerState:ch['Buyer State']||'Maharashtra',
       buyerPhone:ch['Buyer Phone']||'',buyerEmail:ch['Buyer Email']||'',items
     };
-    const itemsRowsHtml=items.map((it,i)=>`<tr><td>${i+1}</td><td>${it.desc||''}</td><td>${it.hsn||''}</td><td style="text-align:right;">${it.qty}</td><td>${it.unit||'Nos'}</td><td>${it.remarks||''}</td></tr>`).join('');
+    const itemsRowsHtml=items.map((it,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(it.desc||'')}</td><td>${escapeHtml(it.hsn||'')}</td><td style="text-align:right;">${escapeHtml(it.qty)}</td><td>${escapeHtml(it.unit||'Nos')}</td><td>${escapeHtml(it.remarks||'')}</td></tr>`).join('');
     document.getElementById('challan-view-body').innerHTML=`
       <div class="form-grid" style="margin-bottom:16px;">
-        <div><div style="font-size:11px;color:var(--text3);">Challan No.</div><div style="font-weight:600;">${ch['Challan No']||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Challan No.</div><div style="font-weight:600;">${escapeHtml(ch['Challan No'])||'-'}</div></div>
         <div><div style="font-size:11px;color:var(--text3);">Date</div><div style="font-weight:600;">${fmtDate(ch['Date'])}</div></div>
-        <div><div style="font-size:11px;color:var(--text3);">Ref. Invoice No.</div><div style="font-weight:600;">${ch['Ref Invoice No']||'-'}</div></div>
-        <div><div style="font-size:11px;color:var(--text3);">Transport</div><div style="font-weight:600;">${ch['Transport']||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Ref. Invoice No.</div><div style="font-weight:600;">${escapeHtml(ch['Ref Invoice No'])||'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Transport</div><div style="font-weight:600;">${escapeHtml(ch['Transport'])||'-'}</div></div>
       </div>
       <div style="margin-bottom:16px;">
         <div style="font-size:11px;color:var(--text3);text-transform:uppercase;">Consignee (Ship To)</div>
-        <div style="font-weight:600;">${ch['Buyer Name']||'-'}</div>
-        <div style="font-size:13px;color:var(--text2);white-space:pre-line;">${ch['Buyer Address']||'-'}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px;">GSTIN: ${ch['Buyer GSTIN']||'Unregistered'}${ch['Buyer Phone']?' · Ph: '+ch['Buyer Phone']:''}${ch['Buyer Email']?' · '+ch['Buyer Email']:''}</div>
+        <div style="font-weight:600;">${escapeHtml(ch['Buyer Name'])||'-'}</div>
+        <div style="font-size:13px;color:var(--text2);white-space:pre-line;">${escapeHtml(ch['Buyer Address'])||'-'}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px;">GSTIN: ${escapeHtml(ch['Buyer GSTIN'])||'Unregistered'}${ch['Buyer Phone']?' · Ph: '+escapeHtml(ch['Buyer Phone']):''}${ch['Buyer Email']?' · '+escapeHtml(ch['Buyer Email']):''}</div>
       </div>
       <table class="items-table">
         <thead><tr><th>#</th><th>Description</th><th>HSN</th><th style="text-align:right;">Qty</th><th>Unit</th><th>Remarks</th></tr></thead>
         <tbody>${itemsRowsHtml||'<tr><td colspan="6" style="text-align:center;color:var(--text3);">No items</td></tr>'}</tbody>
       </table>
-      ${ch['Notes']?`<div style="margin-top:14px;font-size:12px;color:var(--text2);"><strong>Notes:</strong> ${ch['Notes']}</div>`:''}`;
+      ${ch['Notes']?`<div style="margin-top:14px;font-size:12px;color:var(--text2);"><strong>Notes:</strong> ${escapeHtml(ch['Notes'])}</div>`:''}`;
     openModal('challan-view-modal');
   }catch(e){showToast('Failed to load challan.','error');}
 }
@@ -4689,7 +5235,7 @@ function handlePreviewInvoice(){
     buyerName:invState.buyer.name||'-', buyerAddress:invState.buyer.address, buyerGstin:invState.buyer.gstin,
     buyerState:invState.buyer.state, stateCode:invState.buyer.stateCode||'27',
     buyerPhone:invState.buyer.phone, buyerEmail:invState.buyer.email,
-    subTotal:t.subTotal, cgstRate:invState.taxes.cgst, sgstRate:invState.taxes.sgst, igstRate:invState.taxes.igst,
+    subTotal:t.subTotal, cgstRate:t.cgstRate, sgstRate:t.sgstRate, igstRate:t.igstRate,
     cgstAmount:t.cgstAmt, sgstAmount:t.sgstAmt, igstAmount:t.igstAmt, grandTotal:t.grandTotal,
     items:invState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:item.qty,rate:item.rate,unit:item.unit||'Nos',amount:(parseFloat(item.qty)||0)*(parseFloat(item.rate)||0)}))
   });
@@ -4885,7 +5431,7 @@ async function onQuotBuyerChange(val){
   const local=invState.savedBuyers.filter(b=>(b.name||b.Name||'').toLowerCase().includes(query.toLowerCase()));
   if(local.length){
     const box=document.getElementById('qt-buyer-dropdown');
-    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name||b.Name||''}</div><div class="buyer-option-sub">${b.address||b.Address||''}</div></div>`).join('');
+    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name||b.Name||'')}</div><div class="buyer-option-sub">${escapeHtml(b.address||b.Address||'')}</div></div>`).join('');
     box.style.display='block';
     box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateQuotBuyerFields(local[parseInt(el.dataset.idx)]);closeQuotBuyerDropdown();showToast('Buyer loaded','success');});});
   }
@@ -4899,7 +5445,7 @@ async function onQuotBuyerChange(val){
         const norm=data.buyers.map(b=>({name:b.name||b.Name||'',address:b.address||b.Address||'',gstin:b.gstin||b.GSTIN||'',state:b.state||b.State||'Maharashtra',phone:b.phone||b.Phone||'',email:b.email||b.Email||''}));
         norm.forEach(b=>{const idx=invState.savedBuyers.findIndex(x=>(x.name||x.Name)===b.name);if(idx>=0)invState.savedBuyers[idx]=b;else invState.savedBuyers.push(b);});
         const box=document.getElementById('qt-buyer-dropdown');
-        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name}</div><div class="buyer-option-sub">${b.address}${b.gstin?' · '+b.gstin:''}</div></div>`).join('');
+        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name)}</div><div class="buyer-option-sub">${escapeHtml(b.address)}${b.gstin?' · '+escapeHtml(b.gstin):''}</div></div>`).join('');
         box.style.display='block';
         box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateQuotBuyerFields(norm[parseInt(el.dataset.idx)]);closeQuotBuyerDropdown();showToast('Buyer loaded','success');});});
       }
@@ -5008,10 +5554,18 @@ function handlePreviewQuotation(){
   const iframe=document.createElement('iframe');
   iframe.id='_print_frame_quot';
   iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
-  iframe.onload=function(){setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);};
   document.body.appendChild(iframe);
   const iDoc=iframe.contentDocument||iframe.contentWindow.document;
+  // document.write()/close() run synchronously — the DOM (incl. every <img>
+  // tag) already exists the instant close() returns, so there's no need to
+  // wait for an onload event at all. That's deliberate: appendChild() fires
+  // its OWN "load" for the initial blank frame, and depending on timing
+  // the write can fire a second one — an onload handler here runs twice,
+  // printing once too early (blank/no stamp-signature) and once correctly,
+  // which is exactly the double-print-dialog bug this replaces.
   iDoc.open();iDoc.write(htmlContent);iDoc.close();
+  const iWin=iframe.contentWindow;
+  LedgerPrint.waitForImagesToLoad(iWin.document, 4000).then(()=>{ iWin.focus(); iWin.print(); });
 }
 
 // ── PRINT QUOTATION ───────────────────────────────────────────────────────────
@@ -5032,10 +5586,18 @@ function handlePrintQuotation(){
   const iframe=document.createElement('iframe');
   iframe.id='_print_frame_quot';
   iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
-  iframe.onload=function(){setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);};
   document.body.appendChild(iframe);
   const iDoc=iframe.contentDocument||iframe.contentWindow.document;
+  // document.write()/close() run synchronously — the DOM (incl. every <img>
+  // tag) already exists the instant close() returns, so there's no need to
+  // wait for an onload event at all. That's deliberate: appendChild() fires
+  // its OWN "load" for the initial blank frame, and depending on timing
+  // the write can fire a second one — an onload handler here runs twice,
+  // printing once too early (blank/no stamp-signature) and once correctly,
+  // which is exactly the double-print-dialog bug this replaces.
   iDoc.open();iDoc.write(htmlContent);iDoc.close();
+  const iWin=iframe.contentWindow;
+  LedgerPrint.waitForImagesToLoad(iWin.document, 4000).then(()=>{ iWin.focus(); iWin.print(); });
 }
 
 // Returns the full print document as a string, unchanged contract: the caller
@@ -5068,13 +5630,13 @@ function renderQuotationsTable(quotations){
   document.getElementById('quotations-body').innerHTML=[...quotations].reverse().map(qt=>{
     let items=[];try{items=JSON.parse(qt['Items (JSON)']||'[]');}catch(e){}
     return`<tr>
-      <td style="font-weight:600;color:var(--accent)">${qt['Quotation No']||'-'}</td>
-      <td>${qt['Buyer Name']||'-'}</td>
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(qt['Quotation No'])||'-'}</td>
+      <td>${escapeHtml(qt['Buyer Name'])||'-'}</td>
       <td class="hide-mobile">${fmtDate(qt['Date'])}</td>
       <td class="hide-mobile">${fmtDate(qt['Valid Until'])}</td>
       <td style="font-weight:600;">₹${parseFloat(qt['Grand Total']||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
       <td class="hide-mobile" style="font-size:12px;">${items.length} item(s)</td>
-      <td><button class="btn" style="padding:4px 10px;font-size:12px;" onclick="reprintQuotation('${(qt['Quotation No']||'').replace(/'/g,"\\'")}')">Reprint</button></td>
+      <td><button class="btn" style="padding:4px 10px;font-size:12px;" onclick="reprintQuotation('${escapeForInlineHandler(qt['Quotation No'])}')">Reprint</button></td>
     </tr>`;
   }).join('');
 }
@@ -5109,10 +5671,11 @@ async function reprintQuotation(quotNo){
     const iframe=document.createElement('iframe');
     iframe.id='_print_frame_quot';
     iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
-    iframe.onload=function(){setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);};
     document.body.appendChild(iframe);
     const iDoc=iframe.contentDocument||iframe.contentWindow.document;
     iDoc.open();iDoc.write(htmlContent);iDoc.close();
+    const iWin=iframe.contentWindow;
+    LedgerPrint.waitForImagesToLoad(iWin.document, 4000).then(()=>{ iWin.focus(); iWin.print(); });
   }catch(e){showToast('Could not load quotation.','error');}
 }
 
@@ -5134,9 +5697,9 @@ async function onItemDescInput(id,val,type){
     const rate=parseFloat(it['Rate']||it.rate||0);
     const gst=it['GST']||it.gst||0;
     const unit=it['Unit']||it.unit||'Nos';
-    return`<div class="item-option" data-idx="${i}" data-name="${name}" data-hsn="${hsn}" data-rate="${rate}" data-gst="${gst}" data-unit="${unit}">
-      <div class="item-option-name">${name}</div>
-      <div class="item-option-sub">HSN: ${hsn||'—'} &nbsp;·&nbsp; Rate: ₹${rate} &nbsp;·&nbsp; GST: ${gst}% &nbsp;·&nbsp; Unit: ${unit}</div>
+    return`<div class="item-option" data-idx="${i}" data-name="${escapeHtml(name)}" data-hsn="${escapeHtml(hsn)}" data-rate="${rate}" data-gst="${escapeHtml(gst)}" data-unit="${escapeHtml(unit)}">
+      <div class="item-option-name">${escapeHtml(name)}</div>
+      <div class="item-option-sub">HSN: ${escapeHtml(hsn)||'—'} &nbsp;·&nbsp; Rate: ₹${rate} &nbsp;·&nbsp; GST: ${escapeHtml(gst)}% &nbsp;·&nbsp; Unit: ${escapeHtml(unit)}</div>
     </div>`;
   }).join('');
   drop.style.display='block';
@@ -5305,11 +5868,15 @@ function recalcCN(){
   const gstType=document.getElementById('cn-gst-type')?.value||'CGST_SGST';
   let cgstAmt=0,sgstAmt=0,igstAmt=0;
   if(gstType==='IGST'){igstAmt=sub*(cnState.taxes.igst/100);}
-  else{cgstAmt=sub*(cnState.taxes.cgst/100);sgstAmt=sub*(cnState.taxes.sgst/100);}
+  else if(gstType!=='NO_GST'){cgstAmt=sub*(cnState.taxes.cgst/100);sgstAmt=sub*(cnState.taxes.sgst/100);}
   const grand=Math.round(sub+cgstAmt+sgstAmt+igstAmt);
   const el=id=>document.getElementById(id);
   if(el('cn-modal-subtotal'))el('cn-modal-subtotal').textContent='₹'+sub.toFixed(2);
-  if(gstType==='IGST'){
+  if(gstType==='NO_GST'){
+    if(el('cn-modal-cgst-row'))el('cn-modal-cgst-row').style.display='none';
+    if(el('cn-modal-sgst-row'))el('cn-modal-sgst-row').style.display='none';
+    if(el('cn-modal-igst-row'))el('cn-modal-igst-row').style.display='none';
+  }else if(gstType==='IGST'){
     if(el('cn-modal-cgst-row'))el('cn-modal-cgst-row').style.display='none';
     if(el('cn-modal-sgst-row'))el('cn-modal-sgst-row').style.display='none';
     if(el('cn-modal-igst-row'))el('cn-modal-igst-row').style.display='';
@@ -5335,10 +5902,13 @@ function recalcCN(){
 function getCNComputedTotals(){
   const sub=cnState.lineItems.reduce((a,i)=>a+(parseFloat(i.qty)||0)*(parseFloat(i.rate)||0),0);
   const gstType=document.getElementById('cn-gst-type')?.value||'CGST_SGST';
-  let cgstAmt=0,sgstAmt=0,igstAmt=0;
-  if(gstType==='IGST'){igstAmt=sub*(cnState.taxes.igst/100);}
-  else{cgstAmt=sub*(cnState.taxes.cgst/100);sgstAmt=sub*(cnState.taxes.sgst/100);}
-  return{subTotal:sub,cgstAmt,sgstAmt,igstAmt,grandTotal:Math.round(sub+cgstAmt+sgstAmt+igstAmt)};
+  let cgstAmt=0,sgstAmt=0,igstAmt=0,cgstRate=0,sgstRate=0,igstRate=0;
+  if(gstType==='NO_GST'){
+    // See the matching comment in getComputedTotals() — rates stay 0 here
+    // rather than falling back to cnState.taxes.*.
+  }else if(gstType==='IGST'){igstAmt=sub*(cnState.taxes.igst/100);igstRate=cnState.taxes.igst;}
+  else{cgstAmt=sub*(cnState.taxes.cgst/100);sgstAmt=sub*(cnState.taxes.sgst/100);cgstRate=cnState.taxes.cgst;sgstRate=cnState.taxes.sgst;}
+  return{subTotal:sub,cgstAmt,sgstAmt,igstAmt,cgstRate,sgstRate,igstRate,grandTotal:Math.round(sub+cgstAmt+sgstAmt+igstAmt)};
 }
 
 // ── CREDIT/DEBIT NOTE — POPULATE ITEM FIELDS (called by onItemDescInput) ────────
@@ -5378,7 +5948,7 @@ async function onCNBuyerChange(val){
   const local=invState.savedBuyers.filter(b=>(b.name||b.Name||'').toLowerCase().includes(query.toLowerCase()));
   if(local.length){
     const box=document.getElementById('cn-buyer-dropdown');
-    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name||b.Name||''}</div><div class="buyer-option-sub">${b.address||b.Address||''}</div></div>`).join('');
+    box.innerHTML=local.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name||b.Name||'')}</div><div class="buyer-option-sub">${escapeHtml(b.address||b.Address||'')}</div></div>`).join('');
     box.style.display='block';
     box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateCNBuyerFields(local[parseInt(el.dataset.idx)]);closeCNBuyerDropdown();showToast('Buyer loaded','success');});});
   }
@@ -5392,7 +5962,7 @@ async function onCNBuyerChange(val){
         const norm=data.buyers.map(b=>({name:b.name||b.Name||'',address:b.address||b.Address||'',gstin:b.gstin||b.GSTIN||'',state:b.state||b.State||'Maharashtra',stateCode:b.stateCode||b['State Code']||'27',phone:b.phone||b.Phone||'',email:b.email||b.Email||''}));
         norm.forEach(b=>{const idx=invState.savedBuyers.findIndex(x=>(x.name||x.Name)===b.name);if(idx>=0)invState.savedBuyers[idx]=b;else invState.savedBuyers.push(b);});
         const box=document.getElementById('cn-buyer-dropdown');
-        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name}</div><div class="buyer-option-sub">${b.address}${b.gstin?' · '+b.gstin:''}</div></div>`).join('');
+        box.innerHTML=norm.map((b,i)=>`<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name)}</div><div class="buyer-option-sub">${escapeHtml(b.address)}${b.gstin?' · '+escapeHtml(b.gstin):''}</div></div>`).join('');
         box.style.display='block';
         box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateCNBuyerFields(norm[parseInt(el.dataset.idx)]);closeCNBuyerDropdown();showToast('Buyer loaded','success');});});
       }
@@ -5426,7 +5996,9 @@ async function handleSaveCreditNote(){
   if(btn){btn.disabled=true;btn.textContent='Saving…';}
 
   const totals=getCNComputedTotals();
-  const cleanItems=cnState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:parseFloat(item.gstPct)||0,amount:parseFloat(item.amount)||0}));
+  // No-GST: see the matching comment on the invoice save path above.
+  const _cnNoGst=document.getElementById('cn-gst-type')?.value==='NO_GST';
+  const cleanItems=cnState.lineItems.map(item=>({desc:item.desc||'',hsn:item.hsn||'',qty:parseFloat(item.qty)||0,rate:parseFloat(item.rate)||0,unit:item.unit||'Nos',gstPct:_cnNoGst?0:(parseFloat(item.gstPct)||0),amount:parseFloat(item.amount)||0}));
 
   const payload={
     action:'saveCreditDebitNote',
@@ -5441,9 +6013,9 @@ async function handleSaveCreditNote(){
       buyerName:cnState.buyer.name, buyerPhone:cnState.buyer.phone||'', buyerEmail:cnState.buyer.email||'',
       buyerAddress:cnState.buyer.address||'', buyerGstin:cnState.buyer.gstin||'',
       buyerState:cnState.buyer.state||'Maharashtra', stateCode:cnState.buyer.stateCode||'27',
-      subTotal:totals.subTotal, cgstRate:cnState.taxes.cgst, cgstAmount:totals.cgstAmt,
-      sgstRate:cnState.taxes.sgst, sgstAmount:totals.sgstAmt,
-      igstRate:cnState.taxes.igst, igstAmount:totals.igstAmt,
+      subTotal:totals.subTotal, cgstRate:totals.cgstRate, cgstAmount:totals.cgstAmt,
+      sgstRate:totals.sgstRate, sgstAmount:totals.sgstAmt,
+      igstRate:totals.igstRate, igstAmount:totals.igstAmt,
       taxAmount:totals.cgstAmt+totals.sgstAmt+totals.igstAmt, grandTotal:totals.grandTotal,
       items:cleanItems
     }
@@ -5470,7 +6042,8 @@ async function handleSaveCreditNote(){
 // ── PREVIEW / PRINT CREDIT/DEBIT NOTE (mirrors Invoice's printInvoiceHtml) ──────
 function handlePreviewCreditNote(){
   const totals=getCNComputedTotals();
-  const cleanItems=cnState.lineItems.map(i=>({desc:i.desc||'',hsn:i.hsn||'',qty:i.qty,unit:i.unit||'Nos',rate:i.rate||0,gstPct:i.gstPct||0,amount:i.amount||0}));
+  const _cnNoGst=document.getElementById('cn-gst-type')?.value==='NO_GST';
+  const cleanItems=cnState.lineItems.map(i=>({desc:i.desc||'',hsn:i.hsn||'',qty:i.qty,unit:i.unit||'Nos',rate:i.rate||0,gstPct:_cnNoGst?0:(i.gstPct||0),amount:i.amount||0}));
   buildCreditNoteHtml({
     noteType:cnState.noteType||'CREDIT',
     noteNo:document.getElementById('cn-no').value.trim()||'PREVIEW',
@@ -5481,9 +6054,9 @@ function handlePreviewCreditNote(){
     buyerName:cnState.buyer.name||'-', buyerAddress:cnState.buyer.address, buyerGstin:cnState.buyer.gstin,
     buyerState:cnState.buyer.state, buyerPhone:cnState.buyer.phone, buyerEmail:cnState.buyer.email,
     stateCode:cnState.buyer.stateCode,
-    subTotal:totals.subTotal, cgstRate:cnState.taxes.cgst, cgstAmount:totals.cgstAmt,
-    sgstRate:cnState.taxes.sgst, sgstAmount:totals.sgstAmt,
-    igstRate:cnState.taxes.igst, igstAmount:totals.igstAmt,
+    subTotal:totals.subTotal, cgstRate:totals.cgstRate, cgstAmount:totals.cgstAmt,
+    sgstRate:totals.sgstRate, sgstAmount:totals.sgstAmt,
+    igstRate:totals.igstRate, igstAmount:totals.igstAmt,
     grandTotal:totals.grandTotal, items:cleanItems
   });
 }
@@ -5491,7 +6064,8 @@ function handlePreviewCreditNote(){
 function handlePrintCreditNote(){
   if(!cnState.isSaved){showToast('Please save the note before printing!','error');return;}
   const totals=getCNComputedTotals();
-  const cleanItems=cnState.lineItems.map(i=>({desc:i.desc||'',hsn:i.hsn||'',qty:i.qty,unit:i.unit||'Nos',rate:i.rate||0,gstPct:i.gstPct||0,amount:i.amount||0}));
+  const _cnNoGst=document.getElementById('cn-gst-type')?.value==='NO_GST';
+  const cleanItems=cnState.lineItems.map(i=>({desc:i.desc||'',hsn:i.hsn||'',qty:i.qty,unit:i.unit||'Nos',rate:i.rate||0,gstPct:_cnNoGst?0:(i.gstPct||0),amount:i.amount||0}));
   buildCreditNoteHtml({
     noteType:cnState.noteType||'CREDIT',
     noteNo:cnState.noteNo||document.getElementById('cn-no').value.trim(),
@@ -5502,9 +6076,9 @@ function handlePrintCreditNote(){
     buyerName:cnState.buyer.name, buyerAddress:cnState.buyer.address, buyerGstin:cnState.buyer.gstin,
     buyerState:cnState.buyer.state, buyerPhone:cnState.buyer.phone, buyerEmail:cnState.buyer.email,
     stateCode:cnState.buyer.stateCode,
-    subTotal:totals.subTotal, cgstRate:cnState.taxes.cgst, cgstAmount:totals.cgstAmt,
-    sgstRate:cnState.taxes.sgst, sgstAmount:totals.sgstAmt,
-    igstRate:cnState.taxes.igst, igstAmount:totals.igstAmt,
+    subTotal:totals.subTotal, cgstRate:totals.cgstRate, cgstAmount:totals.cgstAmt,
+    sgstRate:totals.sgstRate, sgstAmount:totals.sgstAmt,
+    igstRate:totals.igstRate, igstAmount:totals.igstAmt,
     grandTotal:totals.grandTotal, items:cleanItems
   });
 }
@@ -5542,13 +6116,13 @@ function renderCreditNotesTable(notes){
   document.getElementById('creditnotes-body').innerHTML=[...notes].reverse().map(n=>{
     const type=(n['Note Type']||'CREDIT')==='DEBIT'?'Debit':'Credit';
     return`<tr>
-      <td style="font-weight:600;color:var(--accent)">${n['Note No']||'-'}</td>
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(n['Note No'])||'-'}</td>
       <td>${type}</td>
-      <td>${n['Buyer Name']||'-'}</td>
+      <td>${escapeHtml(n['Buyer Name'])||'-'}</td>
       <td class="hide-mobile">${fmtDate(n['Date'])}</td>
-      <td class="hide-mobile">${n['Against Invoice No']||'-'}</td>
+      <td class="hide-mobile">${escapeHtml(n['Against Invoice No'])||'-'}</td>
       <td style="font-weight:600;">₹${parseFloat(n['Grand Total']||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-      <td><button class="btn" style="padding:4px 10px;font-size:12px;" onclick="reprintCreditNote('${(n['Note No']||'').replace(/'/g,"\\'")}')">Reprint</button></td>
+      <td><button class="btn" style="padding:4px 10px;font-size:12px;" onclick="reprintCreditNote('${escapeForInlineHandler(n['Note No'])}')">Reprint</button></td>
     </tr>`;
   }).join('');
 }
@@ -5694,9 +6268,9 @@ function renderAMCTimeline(){
   strip.innerHTML = upcoming.map(c=>{
     const cls = c.days<0?'urgent': c.days<=30?'warn':'ok';
     const label = c.days<0?`${Math.abs(c.days)}d overdue`: c.days===0?'Today':c.days===1?'Tomorrow':`${c.days}d left`;
-    const name=c['Customer Name']||c.customerName||'-';
+    const name=escapeHtml(c['Customer Name']||c.customerName||'-');
     const expDate=c['Expiry Date']||c.expiryDate||'';
-    const cno=c['Contract No']||c.contractNo||'';
+    const cno=escapeHtml(c['Contract No']||c.contractNo||'');
     return`<div class="amc-timeline-card ${cls}" title="Click to view" onclick="navigate('amc')">
       <div class="amc-tl-name">${name}</div>
       <div class="amc-tl-date">Expires: ${fmtDate(expDate)}</div>
@@ -5716,14 +6290,14 @@ function renderAMCTable(list){
     const days=amcDaysLeft(c['Expiry Date']||c.expiryDate);
     const origIdx=liveAMC.findIndex(x=>x['Contract No']===c['Contract No']);
     const val=parseFloat(c['AMC Value']||c.value||0);
-    const contractNo=c['Contract No']||c.contractNo||'-';
-    const customerName=c['Customer Name']||c.customerName||'-';
-    const service=c['Service Description']||c.service||'-';
-    const phone=c['Phone']||c.phone||'';
-    const email=c['Email']||c.email||'';
+    const contractNo=escapeHtml(c['Contract No']||c.contractNo||'-');
+    const customerName=escapeHtml(c['Customer Name']||c.customerName||'-');
+    const service=escapeHtml(c['Service Description']||c.service||'-');
+    const phone=escapeHtml(c['Phone']||c.phone||'');
+    const email=escapeHtml(c['Email']||c.email||'');
     const startDate=c['Start Date']||c.startDate||'';
     const expiryDate=c['Expiry Date']||c.expiryDate||'';
-    const safeNo=encodeURIComponent(contractNo);
+    const safeNo=encodeURIComponent(c['Contract No']||c.contractNo||'');
     return`<tr>
       <td style="font-weight:600;color:var(--accent)">${contractNo}</td>
       <td><div style="font-weight:500;">${customerName}</div><div style="font-size:11px;color:var(--text3);">${phone||email||''}</div></td>
@@ -5733,9 +6307,10 @@ function renderAMCTable(list){
       <td style="font-weight:600;">₹${val?val.toLocaleString('en-IN',{minimumFractionDigits:2}):'-'}</td>
       <td>${amcBadgeHtml(days)}</td>
       <td>${amcDaysHtml(days)}</td>
-      <td style="display:flex;gap:6px;">
-        <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="editAMC(${origIdx})">Edit</button>
-        <button class="btn" style="padding:4px 8px;font-size:12px;color:var(--danger);border-color:var(--danger);" onclick="deleteAMC('${safeNo}')">✕</button>
+      <td style="white-space:nowrap;">
+        <button class="btn" title="View" style="padding:5px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;" onclick="viewAMC(${origIdx})"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button class="btn" title="Edit" style="padding:5px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;margin-left:4px;" onclick="editAMC(${origIdx})"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+        <button class="btn" title="Delete" style="padding:5px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;margin-left:4px;color:var(--danger);border-color:var(--danger);" onclick="deleteAMC('${safeNo}')"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>
       </td>
     </tr>`;
   }).join('');
@@ -5758,9 +6333,52 @@ function filterAMC(searchVal){
   renderAMCTable(filtered);
 }
 
+// ── AMC site photo + location capture ─────────────────────────────────────
+let _amcImageBase64='';
+let _amcImageMimeType='';
+
+function onAMCImageSelected(input){
+  const file=input.files&&input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const img=new Image();
+    img.onload=function(){
+      // Downscale + re-encode as JPEG client-side so the photo comfortably
+      // fits a POST body and a Drive file, instead of shipping a multi-MB
+      // camera original.
+      const maxDim=900;
+      let w=img.width, h=img.height;
+      if(w>maxDim||h>maxDim){ const scale=maxDim/Math.max(w,h); w=Math.round(w*scale); h=Math.round(h*scale); }
+      const canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL('image/jpeg',0.7);
+      _amcImageBase64=dataUrl.split(',')[1];
+      _amcImageMimeType='image/jpeg';
+      document.getElementById('amc-image-preview').innerHTML=`<img src="${dataUrl}" style="max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--border);">`;
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function captureAMCLocation(){
+  if(!navigator.geolocation){ showToast('Geolocation is not supported in this browser.','error'); return; }
+  showToast('Getting your location…');
+  navigator.geolocation.getCurrentPosition(function(pos){
+    const lat=pos.coords.latitude.toFixed(6), lng=pos.coords.longitude.toFixed(6);
+    document.getElementById('amc-location').value=`https://maps.google.com/?q=${lat},${lng}`;
+    showToast('Location captured.','success');
+  }, function(err){
+    showToast('Could not get location: '+err.message,'error');
+  }, { enableHighAccuracy:true, timeout:10000 });
+}
+
 function openAddAMC(){
   document.getElementById('amc-modal-title').textContent='Add AMC Contract';
   document.getElementById('amc-edit-row').value='';
+  document.getElementById('amc-calendar-event-id').value='';
   document.getElementById('amc-contract-no').value=genNextAMCNo();
   document.getElementById('amc-customer-name').value='';
   document.getElementById('amc-phone').value='';
@@ -5771,6 +6389,11 @@ function openAddAMC(){
   document.getElementById('amc-value').value='';
   document.getElementById('amc-freq').value='Annual';
   document.getElementById('amc-notes').value='';
+  document.getElementById('amc-image-file').value='';
+  document.getElementById('amc-image-url').value='';
+  document.getElementById('amc-image-preview').innerHTML='';
+  document.getElementById('amc-location').value='';
+  _amcImageBase64=''; _amcImageMimeType='';
   openModal('amc-modal');
 }
 
@@ -5779,6 +6402,7 @@ function editAMC(idx){
   if(!c) return;
   document.getElementById('amc-modal-title').textContent='Edit AMC Contract';
   document.getElementById('amc-edit-row').value=idx;
+  document.getElementById('amc-calendar-event-id').value=c['Calendar Event ID']||c.calendarEventId||'';
   document.getElementById('amc-contract-no').value=c['Contract No']||c.contractNo||'';
   document.getElementById('amc-customer-name').value=c['Customer Name']||c.customerName||'';
   document.getElementById('amc-phone').value=c['Phone']||c.phone||'';
@@ -5789,7 +6413,73 @@ function editAMC(idx){
   document.getElementById('amc-value').value=c['AMC Value']||c.value||'';
   document.getElementById('amc-freq').value=c['Payment Frequency']||c.freq||'Annual';
   document.getElementById('amc-notes').value=c['Notes']||c.notes||'';
+  document.getElementById('amc-image-file').value='';
+  const imgUrl=c['Image URL']||c.imageUrl||'';
+  document.getElementById('amc-image-url').value=imgUrl;
+  document.getElementById('amc-image-preview').innerHTML=imgUrl?`<a href="${imgUrl}" target="_blank"><img src="${imgUrl}" style="max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--border);"></a>`:'';
+  document.getElementById('amc-location').value=c['Location']||c.location||'';
+  _amcImageBase64=''; _amcImageMimeType='';
   openModal('amc-modal');
+}
+
+let _viewedAMCIdx=-1;
+
+function viewAMC(idx){
+  const c=liveAMC[idx];
+  if(!c) return;
+  _viewedAMCIdx=idx;
+  const contractNo=escapeHtml(c['Contract No']||c.contractNo||'-');
+  const customerName=escapeHtml(c['Customer Name']||c.customerName||'-');
+  const phone=escapeHtml(c['Phone']||c.phone||'');
+  const email=escapeHtml(c['Email']||c.email||'');
+  const service=escapeHtml(c['Service Description']||c.service||'-');
+  const startDate=c['Start Date']||c.startDate||'';
+  const expiryDate=c['Expiry Date']||c.expiryDate||'';
+  const value=parseFloat(c['AMC Value']||c.value||0);
+  const freq=escapeHtml(c['Payment Frequency']||c.freq||'Annual');
+  const notes=escapeHtml(c['Notes']||c.notes||'');
+  const imageUrl=c['Image URL']||c.imageUrl||'';
+  const location=c['Location']||c.location||'';
+  const savedBy=escapeHtml(c['Saved By']||c.savedBy||'');
+  const days=amcDaysLeft(expiryDate);
+  const locationHtml=location?(/^https?:\/\//i.test(location)?`<a href="${escapeHtml(location)}" target="_blank" style="color:var(--secondary);word-break:break-all;">${escapeHtml(location)}</a>`:escapeHtml(location)):'';
+  const panel=(label,inner)=>`<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+    <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">${label}</div>
+    ${inner}
+  </div>`;
+
+  document.getElementById('amc-view-body').innerHTML=`
+    <div style="display:flex;gap:18px;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;">Contract No.</div>
+        <div style="font-size:19px;font-weight:700;font-family:var(--font-display);color:var(--accent);">${contractNo}</div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">${amcBadgeHtml(days)}${amcDaysHtml(days)}</div>
+      </div>
+      ${imageUrl
+        ?`<a href="${escapeHtml(imageUrl)}" target="_blank" title="Open full-size photo" style="display:block;width:130px;height:130px;flex-shrink:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);background:var(--surface2);">
+            <img src="${escapeHtml(imageUrl)}" style="width:100%;height:100%;object-fit:cover;display:block;">
+          </a>`
+        :`<div style="width:130px;height:130px;flex-shrink:0;border-radius:var(--radius);border:1px dashed var(--border2);display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:11px;text-align:center;padding:8px;">No site photo</div>`
+      }
+    </div>
+    ${panel('Schedule & Value', `
+      <div class="form-grid">
+        <div><div style="font-size:11px;color:var(--text3);">Start Date</div><div style="font-weight:600;">${fmtDate(startDate)}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Expiry Date</div><div style="font-weight:600;">${fmtDate(expiryDate)}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">AMC Value</div><div style="font-weight:600;">₹${value?value.toLocaleString('en-IN',{minimumFractionDigits:2}):'-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text3);">Payment Frequency</div><div style="font-weight:600;">${freq}</div></div>
+      </div>
+    `)}
+    ${panel('Customer', `
+      <div style="font-weight:600;">${customerName}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:2px;">${phone?'Ph: '+phone:''}${phone&&email?' · ':''}${email||''}</div>
+    `)}
+    ${panel('Service / Product', `<div style="font-size:13px;color:var(--text2);white-space:pre-line;">${service}</div>`)}
+    ${notes?panel('Notes', `<div style="font-size:13px;color:var(--text2);white-space:pre-line;">${notes}</div>`):''}
+    ${locationHtml?panel('Location', `<div style="font-size:13px;">${locationHtml}</div>`):''}
+    ${savedBy?`<div style="font-size:11px;color:var(--text3);text-align:right;">Saved by ${savedBy}</div>`:''}
+  `;
+  openModal('amc-view-modal');
 }
 
 function deleteAMC(encodedContractNo){
@@ -5804,6 +6494,47 @@ function deleteAMC(encodedContractNo){
       showToast(d.message||'Delete failed.','error');
     }
   }).catch(()=>showToast('Delete failed — check connection.','error'));
+}
+
+// Manual, on-demand calendar sync — always lands on today's date rather
+// than the automatic 30-days-before-expiry calculation, so clicking this
+// gives an immediate, visible result regardless of what the expiry date is
+// (or even whether one's been filled in yet). Works from whatever's
+// currently typed into the form, without requiring a full contract save.
+function syncAmcCalendarNow(){
+  const contractNo=(document.getElementById('amc-contract-no').value||'').trim();
+  const customerName=(document.getElementById('amc-customer-name').value||'').trim();
+  if(!contractNo||!customerName){
+    showToast('Contract No and Customer Name are required first.','error'); return;
+  }
+  const record={
+    contractNo, customerName,
+    phone:      document.getElementById('amc-phone').value||'',
+    email:      document.getElementById('amc-email').value||'',
+    service:    document.getElementById('amc-service').value||'',
+    expiryDate: document.getElementById('amc-expiry-date').value||'',
+    value:      document.getElementById('amc-value').value||''
+  };
+  const editIdx=document.getElementById('amc-edit-row').value;
+  const rowIndex=(editIdx!=='')?parseInt(editIdx,10):-1;
+  const existingEventId=document.getElementById('amc-calendar-event-id').value||'';
+
+  const btn=document.getElementById('amc-calendar-btn');
+  btn.disabled=true; btn.textContent='Adding…';
+  gasPostAMC('syncAmcCalendarNow',{data:record, rowIndex, existingEventId}).then(d=>{
+    btn.disabled=false; btn.textContent='Add to Calendar';
+    if(d.success){
+      // Cache the event ID so a later "Save Contract" click updates this
+      // same event instead of creating a duplicate.
+      if(d.eventId) document.getElementById('amc-calendar-event-id').value=d.eventId;
+      showToast('Added to your calendar for today.','success');
+    } else {
+      showToast(d.message||'Could not add to calendar.','error');
+    }
+  }).catch(()=>{
+    btn.disabled=false; btn.textContent='Add to Calendar';
+    showToast('Failed to reach server — check connection.','error');
+  });
 }
 
 function saveAMCContract(){
@@ -5824,8 +6555,14 @@ function saveAMCContract(){
     expiryDate,
     value:    document.getElementById('amc-value').value||'',
     freq:     document.getElementById('amc-freq').value||'Annual',
-    notes:    document.getElementById('amc-notes').value||''
+    notes:    document.getElementById('amc-notes').value||'',
+    imageUrl: document.getElementById('amc-image-url').value||'',
+    location: document.getElementById('amc-location').value||''
   };
+  if(_amcImageBase64){
+    record.imageBase64=_amcImageBase64;
+    record.imageMimeType=_amcImageMimeType||'image/jpeg';
+  }
 
   const editIdx=document.getElementById('amc-edit-row').value;
   const rowIndex=(editIdx!=='')?parseInt(editIdx,10):-1;
@@ -5838,10 +6575,24 @@ function saveAMCContract(){
   const btn=document.getElementById('amc-save-btn');
   btn.disabled=true; btn.textContent='Saving…';
 
-  gasPostAMC('saveAMCContract',{data:record, rowIndex}).then(d=>{
+  const existingEventId=document.getElementById('amc-calendar-event-id').value||'';
+  gasPostAMC('saveAMCContract',{data:record, rowIndex, existingEventId}).then(d=>{
     btn.disabled=false; btn.textContent='Save Contract';
     if(d.success){
       showToast(rowIndex>=0?'AMC contract updated.':'AMC contract saved.','success');
+      // Shown after the success toast fades — surfaces exactly what
+      // happened with the calendar reminder instead of leaving it
+      // ambiguous whether it fired, was skipped, or failed silently.
+      const calMsg={
+        'created':'Calendar reminder created.',
+        'updated':'Calendar reminder updated.',
+        'skipped-no-calendar':'No Google Calendar ID set — add one in Settings to get AMC reminders.',
+        'skipped-no-expiry':'',
+        'skipped-invalid-date':'Calendar reminder skipped — expiry date could not be read.',
+        'skipped-no-column':'',
+        'error':'Calendar reminder failed: '+(d.calendarWarning||'unknown error')
+      }[d.calendarStatus||''];
+      if(calMsg) setTimeout(()=>showToast(calMsg, d.calendarStatus==='error'||d.calendarStatus==='skipped-invalid-date'?'error':(d.calendarStatus==='skipped-no-calendar'?'':'success')),1600);
       closeModal('amc-modal');
       loadAndRenderAMC();
       loadDashboardAMC();
@@ -5874,9 +6625,9 @@ function onAMCCustomerSearch(val){
   const q=val.toLowerCase();
   const matches=(liveCustomers||[]).filter(c=>(c['Name']||'').toLowerCase().includes(q)).slice(0,8);
   if(!matches.length){drop.style.display='none';return;}
-  drop.innerHTML=matches.map(c=>`<div class="buyer-option" onmousedown="selectAMCCustomer(event,'${(c['Name']||'').replace(/'/g,"\\'")}','${(c['Phone']||'').replace(/'/g,"\\'")}','${(c['Email']||'').replace(/'/g,"\\'")}')">
-    <div class="buyer-option-name">${c['Name']||''}</div>
-    <div class="buyer-option-sub">${c['Phone']||''} ${c['Email']?'· '+c['Email']:''}</div>
+  drop.innerHTML=matches.map(c=>`<div class="buyer-option" onmousedown="selectAMCCustomer(event,'${escapeForInlineHandler(c['Name'])}','${escapeForInlineHandler(c['Phone'])}','${escapeForInlineHandler(c['Email'])}')">
+    <div class="buyer-option-name">${escapeHtml(c['Name'])||''}</div>
+    <div class="buyer-option-sub">${escapeHtml(c['Phone'])||''} ${c['Email']?'· '+escapeHtml(c['Email']):''}</div>
   </div>`).join('');
   drop.style.display='block';
 }
@@ -5918,13 +6669,14 @@ function loadDashboardAMC(){
     list.innerHTML=sorted.slice(0,8).map(c=>{
       const cls=c.days<0?'urgent':c.days<=30?'warn':'ok';
       const label=c.days<0?`${Math.abs(c.days)}d overdue`:c.days===0?'Expires Today':c.days===1?'Expires Tomorrow':`${c.days} days left`;
-      const cName=c['Customer Name']||c.customerName||'-';
-      const cNo=c['Contract No']||c.contractNo||'';
-      const cService=c['Service Description']||c.service||'';
+      const cName=escapeHtml(c['Customer Name']||c.customerName||'-');
+      const cNo=escapeHtml(c['Contract No']||c.contractNo||'');
+      const cServiceRaw=c['Service Description']||c.service||'';
+      const cService=escapeHtml(cServiceRaw.substring(0,40)+(cServiceRaw.length>40?'…':''));
       return`<div class="amc-dash-row" onclick="navigate('amc')">
       <div class="amc-dash-dot ${cls}"></div>
       <div class="amc-dash-name">${cName}<span style="font-size:11px;color:var(--text3);margin-left:8px;">${cNo}</span></div>
-      <div class="amc-dash-meta">${cService?cService.substring(0,40)+(cService.length>40?'…':''):''}</div>
+      <div class="amc-dash-meta">${cServiceRaw?cService:''}</div>
       <div class="amc-dash-days ${cls}">${label}</div>
     </div>`;
     }).join('');
@@ -6080,7 +6832,7 @@ async function onCertRecipientChange(val){
     const box=document.getElementById('cert-recipient-dropdown');
     box.innerHTML=local.map((b,i)=>{
       const sub=[b.address||b.Address||'',b.phone||b.Phone||'',b.gstin||b.GSTIN||b.Gstin||''].filter(Boolean).join(' · ');
-      return `<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name||b.Name||''}</div><div class="buyer-option-sub">${sub}</div></div>`;
+      return `<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name||b.Name||'')}</div><div class="buyer-option-sub">${escapeHtml(sub)}</div></div>`;
     }).join('');
     box.style.display='block';
     box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateCertRecipientFields(local[parseInt(el.dataset.idx)]);closeCertRecipientDropdown();showToast('Recipient loaded','success');});});
@@ -6104,7 +6856,7 @@ async function onCertRecipientChange(val){
         const box=document.getElementById('cert-recipient-dropdown');
         box.innerHTML=norm.map((b,i)=>{
           const sub=[b.address,b.phone,b.gstin].filter(Boolean).join(' · ');
-          return `<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${b.name}</div><div class="buyer-option-sub">${sub}</div></div>`;
+          return `<div class="buyer-option" data-idx="${i}"><div class="buyer-option-name">${escapeHtml(b.name)}</div><div class="buyer-option-sub">${escapeHtml(sub)}</div></div>`;
         }).join('');
         box.style.display='block';
         box.querySelectorAll('.buyer-option').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();populateCertRecipientFields(norm[parseInt(el.dataset.idx)]);closeCertRecipientDropdown();showToast('Recipient loaded','success');});});
@@ -6201,7 +6953,9 @@ function renderCertificatesTable(certs){
     return;
   }
   document.getElementById('certificates-body').innerHTML=[...certs].reverse().map(c=>{
-    const no=(c['Cert No']||'').replace(/'/g,"\\'");
+    const no=escapeForInlineHandler(c['Cert No']);
+    const phone=escapeForInlineHandler(c['Recipient Phone']);
+    const email=escapeForInlineHandler(c['Recipient Email']);
     const today=new Date(); const exp=c['Valid Until']?new Date(c['Valid Until']):null;
     let statusBadge='<span class="badge sent">Issued</span>';
     if(exp){
@@ -6211,17 +6965,49 @@ function renderCertificatesTable(certs){
       else statusBadge='<span class="badge active-amc">Active</span>';
     }
     return`<tr>
-      <td style="font-weight:600;color:var(--accent)">${c['Cert No']||'-'}</td>
-      <td>${c['Recipient Name']||'-'}</td>
-      <td class="hide-mobile">${c['Cert Type']||'-'}</td>
+      <td style="font-weight:600;color:var(--accent)">${escapeHtml(c['Cert No'])||'-'}</td>
+      <td>${escapeHtml(c['Recipient Name'])||'-'}</td>
+      <td class="hide-mobile">${escapeHtml(c['Cert Type'])||'-'}</td>
       <td class="hide-mobile">${fmtDate(c['Issue Date'])}</td>
       <td class="hide-mobile">${c['Valid Until']?fmtDate(c['Valid Until']):'-'}</td>
       <td>${statusBadge}</td>
       <td style="white-space:nowrap;">
         <button class="btn" style="padding:4px 10px;font-size:12px;" onclick="reprintCertificate('${no}')">Print</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="sendCertificateWhatsapp('${no}','${phone}')">WhatsApp</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="sendCertificateEmailToBuyer('${no}','${email}')">Email</button>
       </td>
     </tr>`;
   }).join('');
+}
+
+// ── BUYER-FACING SEND — WhatsApp click-to-chat + direct email ────────────────
+// Mirrors sendInvoiceWhatsapp/sendInvoiceEmailToBuyer above, targeting the
+// certificate's recipient phone/email instead of an invoice's buyer.
+function sendCertificateWhatsapp(certNo, recipientPhone){
+  certNo=String(certNo||'').trim();
+  recipientPhone=String(recipientPhone||'');
+  if(!certNo){ showToast('Certificate number missing.','error'); return; }
+  const digits=recipientPhone.replace(/[^\d]/g,'');
+  if(!digits){ showToast('No recipient phone on file for this certificate.','error'); return; }
+  showToast('Preparing certificate PDF…');
+  gasPostAMC('getCertificateWhatsappLink',{certNo}).then(d=>{
+    if(!d.success){ showToast(d.message||'Could not prepare WhatsApp message.','error'); return; }
+    const waDigits=String(d.phone||recipientPhone||'').replace(/[^\d]/g,'');
+    const waPhone=waDigits.length===10?'91'+waDigits:waDigits;
+    const text=`Hi ${d.recipientName||''}, please find your certificate ${certNo} here: ${d.pdfUrl}`;
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(text)}`,'_blank');
+  }).catch(()=>showToast('Failed to prepare WhatsApp message — check connection.','error'));
+}
+
+function sendCertificateEmailToBuyer(certNo, recipientEmail){
+  certNo=String(certNo||'').trim();
+  recipientEmail=String(recipientEmail||'').trim();
+  if(!certNo){ showToast('Certificate number missing.','error'); return; }
+  if(!recipientEmail){ showToast('No recipient email on file for this certificate.','error'); return; }
+  showToast('Sending certificate email…');
+  gasPostAMC('sendCertificateToBuyer',{certNo}).then(d=>{
+    showToast(d.message||(d.success?'Certificate emailed.':'Email failed.'), d.success?'success':'error');
+  }).catch(()=>showToast('Failed to send email — check connection.','error'));
 }
 
 function filterCertificates(val){
@@ -6295,17 +7081,39 @@ function printCertificateHtml(data){
   const fmtD=fmtDMY(data.issueDate);
   const fmtV=data.validUntil?fmtDMY(data.validUntil):null;
 
+  // Signature layered directly over the stamp (both centered on the same
+  // point) so they blend into one mark, same treatment as the invoice's
+  // Authorised Signatory block — only when BOTH are present; with just one
+  // of the two, it falls back to showing that one on its own (signature
+  // above the line, or the stamp stays in its separate seal circle below).
+  const sigStampHtml = (COMPANY.stamp && COMPANY.signature)
+    ? `<div style="position:relative;width:40mm;height:16mm;margin:0 auto;">
+         <img src="${COMPANY.stamp}" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-height:16mm;max-width:16mm;">
+         <img src="${COMPANY.signature}" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-height:12mm;max-width:40mm;">
+       </div>`
+    : (COMPANY.signature ? `<img src="${COMPANY.signature}" style="max-height:12mm;max-width:40mm;display:block;margin:0 auto;">` : '');
+  const showSeparateSeal = !(COMPANY.stamp && COMPANY.signature); // merged above once both exist — no need to show the stamp twice
+
+  // Remarks column is optional — only shown at all if at least one item
+  // actually has something in it; otherwise dropped entirely (not just left
+  // blank) and the other columns widen to fill the space.
+  const certItems=(data.items&&data.items.length?data.items:[]);
+  const hasItemRemarks=certItems.some(it=>(it.remarks||'').toString().trim());
+
   const htmlContent=`<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
 @page{size:A4 portrait;margin:0;}
 html,body{margin:0;padding:0;width:210mm;height:297mm;overflow:hidden;}
 body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .pc{width:210mm;height:297mm;margin:0 auto;background:#fff;display:flex;flex-direction:column;padding:10mm 12mm;box-sizing:border-box;}
-.cert-border{border:3px solid #2A2660;border-radius:4px;flex:1;display:flex;flex-direction:column;padding:8mm 10mm;position:relative;}
-.cert-border::before{content:'';position:absolute;inset:4px;border:1px solid #7B72E9;border-radius:2px;pointer-events:none;}
-.cert-header{text-align:center;border-bottom:2px solid #2A2660;padding-bottom:6mm;margin-bottom:6mm;}
-.cert-company{font-size:15px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#2A2660;}
-.cert-company-sub{font-size:9px;color:#555;margin-top:2px;}
+.cert-border{border:3px solid #B71C1C;border-radius:4px;flex:1;display:flex;flex-direction:column;padding:8mm 10mm;position:relative;}
+.cert-border::before{content:'';position:absolute;inset:4px;border:1px solid #E57373;border-radius:2px;pointer-events:none;}
+.cert-header{display:flex;align-items:center;gap:4mm;border-bottom:2px solid #B71C1C;padding-bottom:6mm;margin-bottom:6mm;}
+.cert-header-logo{flex:0 0 24mm;width:24mm;display:flex;align-items:center;justify-content:center;}
+.cert-header-logo img{max-width:24mm;max-height:20mm;object-fit:contain;}
+.cert-header-text{flex:1;text-align:center;}
+.cert-company{font-size:30px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:#2A2660;}
+.cert-company-sub{font-size:9px;color:#8B5A2B;margin-top:2px;}
 .cert-title{font-size:22px;font-weight:bold;text-transform:uppercase;letter-spacing:3px;color:#2A2660;margin:5mm 0 2mm;}
 .cert-type{font-size:12px;color:#555;letter-spacing:1px;text-transform:uppercase;}
 .cert-body{flex:1;}
@@ -6324,61 +7132,69 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background
 .cert-meta-label{color:#777;text-transform:uppercase;letter-spacing:0.4px;font-size:9px;}
 .cert-meta-value{font-weight:bold;color:#2A2660;margin-top:1mm;}
 .cert-remarks{font-size:9px;color:#555;margin-top:3mm;font-style:italic;border-top:1px dashed #ccc;padding-top:3mm;}
-.cert-footer{border-top:2px solid #2A2660;padding-top:5mm;margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;}
+.cert-footer{border-top:2px solid #B71C1C;padding-top:5mm;margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;}
 .cert-sign{text-align:center;}
 .cert-sign-line{width:45mm;border-top:1px solid #000;margin:0 auto 1mm;}
 .cert-sign-label{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#555;}
 .cert-seal{width:22mm;height:22mm;border:2px solid #2A2660;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;text-align:center;color:#2A2660;text-transform:uppercase;letter-spacing:0.5px;}
 </style></head><body>
 <div class="pc">
-<div class="cert-border">
+<div class="cert-border" style="${COMPANY.watermark ? `background-image:url('${COMPANY.watermark}');background-repeat:no-repeat;background-position:center center;background-size:65% auto;` : ''}">
 
   <div class="cert-header">
-    <div class="cert-company">${COMPANY.name}</div>
-    <div class="cert-company-sub">${COMPANY.address}</div>
-    <div class="cert-company-sub">Ph: ${COMPANY.phone} &nbsp;|&nbsp; GSTIN: ${COMPANY.gstin}</div>
-    <div class="cert-title">Certificate</div>
-    <div class="cert-type">${data.certType||'Refilling'}</div>
+    ${COMPANY.logo?`<div class="cert-header-logo"><img src="${COMPANY.logo}"></div>`:''}
+    <div class="cert-header-text">
+      <div class="cert-company">${escapeHtml(COMPANY.name)}</div>
+      <div class="cert-company-sub">${escapeHtml(COMPANY.address)}</div>
+      <div class="cert-company-sub">Ph: ${escapeHtml(COMPANY.phone)} &nbsp;|&nbsp; GSTIN: ${escapeHtml(COMPANY.gstin)}</div>
+      <div class="cert-title">Certificate</div>
+      <div class="cert-type">${escapeHtml(data.certType||'Refilling')}</div>
+    </div>
+    ${COMPANY.logo?`<div class="cert-header-logo" style="visibility:hidden;"></div>`:''}
   </div>
 
   <div class="cert-body">
     <div class="cert-no-block">
       <div class="cert-no-label">Certificate No.</div>
-      <div class="cert-no-value">${data.certNo||'-'}</div>
+      <div class="cert-no-value">${escapeHtml(data.certNo)||'-'}</div>
     </div>
 
     <div class="cert-issued-to">
       <div class="cert-issued-label">This is to certify that</div>
-      <div class="cert-recipient">${data.recipientName||'-'}</div>
-      ${data.recipientAddress?`<div class="cert-recipient-addr">${data.recipientAddress}</div>`:''}
-      ${data.recipientGstin?`<div class="cert-recipient-addr" style="margin-top:1mm;font-family:monospace;">GSTIN: <strong>${data.recipientGstin}</strong></div>`:''}
-      ${data.recipientPhone||data.recipientEmail?`<div class="cert-recipient-addr" style="margin-top:1mm;">${data.recipientPhone?'Ph: '+data.recipientPhone:''}${data.recipientPhone&&data.recipientEmail?' &nbsp;|&nbsp; ':''}${data.recipientEmail?data.recipientEmail:''}</div>`:''}
+      <div class="cert-recipient">${escapeHtml(data.recipientName)||'-'}</div>
+      ${data.recipientAddress?`<div class="cert-recipient-addr">${escapeHtml(data.recipientAddress)}</div>`:''}
+      ${data.recipientGstin?`<div class="cert-recipient-addr" style="margin-top:1mm;font-family:monospace;">GSTIN: <strong>${escapeHtml(data.recipientGstin)}</strong></div>`:''}
+      ${data.recipientPhone||data.recipientEmail?`<div class="cert-recipient-addr" style="margin-top:1mm;">${data.recipientPhone?'Ph: '+escapeHtml(data.recipientPhone):''}${data.recipientPhone&&data.recipientEmail?' &nbsp;|&nbsp; ':''}${data.recipientEmail?escapeHtml(data.recipientEmail):''}</div>`:''}
     </div>
 
     <table class="cert-items-table">
-      <thead><tr><th style="width:46%;">Description of Work / Item</th><th style="width:12%;">Qty</th><th style="width:12%;">Unit</th><th style="width:30%;">Remarks</th></tr></thead>
+      <thead><tr>${hasItemRemarks
+        ?`<th style="width:46%;">Description of Work / Item</th><th style="width:12%;">Qty</th><th style="width:12%;">Unit</th><th style="width:30%;">Remarks</th>`
+        :`<th style="width:66%;">Description of Work / Item</th><th style="width:17%;">Qty</th><th style="width:17%;">Unit</th>`
+      }</tr></thead>
       <tbody>
-        ${(data.items&&data.items.length?data.items:[]).map(it=>`<tr><td>${(it.desc||'').replace(/\n/g,'<br/>')}</td><td style="text-align:center;">${it.qty||''}</td><td style="text-align:center;">${it.unit||''}</td><td>${(it.remarks||'').replace(/\n/g,'<br/>')}</td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;color:#999;">No items specified</td></tr>'}
+        ${certItems.map(it=>`<tr><td>${escapeHtml(it.desc||'').replace(/\n/g,'<br/>')}</td><td style="text-align:center;">${escapeHtml(it.qty||'')}</td><td style="text-align:center;">${escapeHtml(it.unit||'')}</td>${hasItemRemarks?`<td>${escapeHtml(it.remarks||'').replace(/\n/g,'<br/>')}</td>`:''}</tr>`).join('')||`<tr><td colspan="${hasItemRemarks?4:3}" style="text-align:center;color:#999;">No items specified</td></tr>`}
       </tbody>
     </table>
 
     <div class="cert-meta">
       <div class="cert-meta-item"><div class="cert-meta-label">Issue Date</div><div class="cert-meta-value">${fmtD}</div></div>
       ${fmtV?`<div class="cert-meta-item"><div class="cert-meta-label">Valid Until</div><div class="cert-meta-value">${fmtV}</div></div>`:''}
-      ${data.refNo?`<div class="cert-meta-item"><div class="cert-meta-label">Ref. No.</div><div class="cert-meta-value">${data.refNo}</div></div>`:''}
-      ${data.site?`<div class="cert-meta-item"><div class="cert-meta-label">Site / Location</div><div class="cert-meta-value">${data.site}</div></div>`:''}
+      ${data.refNo?`<div class="cert-meta-item"><div class="cert-meta-label">Ref. No.</div><div class="cert-meta-value">${escapeHtml(data.refNo)}</div></div>`:''}
+      ${data.site?`<div class="cert-meta-item"><div class="cert-meta-label">Site / Location</div><div class="cert-meta-value">${escapeHtml(data.site)}</div></div>`:''}
     </div>
 
-    ${data.remarks?`<div class="cert-remarks"><strong>Remarks:</strong> ${data.remarks}</div>`:''}
+    ${data.remarks?`<div class="cert-remarks"><strong>Remarks:</strong> ${escapeHtml(data.remarks)}</div>`:''}
   </div>
 
   <div class="cert-footer">
     <div class="cert-sign">
+      ${sigStampHtml}
       <div class="cert-sign-line"></div>
       <div class="cert-sign-label">Authorised Signatory</div>
-      <div style="font-size:9px;color:#555;margin-top:1mm;">${COMPANY.name}</div>
+      <div style="font-size:9px;color:#555;margin-top:1mm;">${escapeHtml(COMPANY.name)}</div>
     </div>
-    <div class="cert-seal">Company<br/>Seal</div>
+    ${showSeparateSeal?`<div class="cert-seal" style="${COMPANY.stamp?'border:none;':''}">${COMPANY.stamp?`<img src="${COMPANY.stamp}" style="width:100%;height:100%;object-fit:contain;">`:'Company<br/>Seal'}</div>`:''}
     <div style="text-align:right;font-size:9px;color:#555;">
       <div>This is a computer-generated certificate.</div>
       <div style="margin-top:1mm;">Subject to Maharashtra Jurisdiction.</div>
@@ -6393,10 +7209,22 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background
   const iframe=document.createElement('iframe');
   iframe.id='_print_frame_cert';
   iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none;';
-  iframe.onload=function(){setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();},300);};
+  // Signature/Stamp are Drive-hosted URLs needing an actual network fetch,
+  // unlike the rest of this self-contained document — a fixed delay isn't
+  // enough on a slower connection, so wait for every image to actually
+  // finish loading (same fix as the invoice/quotation print path).
   document.body.appendChild(iframe);
   const iDoc=iframe.contentDocument||iframe.contentWindow.document;
+  // document.write()/close() run synchronously — the DOM (incl. every <img>
+  // tag) already exists the instant close() returns, so there's no need to
+  // wait for an onload event at all. That's deliberate: appendChild() fires
+  // its OWN "load" for the initial blank frame, and depending on timing
+  // the write can fire a second one — an onload handler here runs twice,
+  // printing once too early (blank/no stamp-signature) and once correctly,
+  // which is exactly the double-print-dialog bug this replaces.
   iDoc.open();iDoc.write(htmlContent);iDoc.close();
+  const iWin=iframe.contentWindow;
+  LedgerPrint.waitForImagesToLoad(iWin.document, 4000).then(()=>{ iWin.focus(); iWin.print(); });
 }
 
 
